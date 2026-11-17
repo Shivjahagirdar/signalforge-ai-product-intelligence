@@ -13,6 +13,9 @@ class Overrides:
     merge: list = field(default_factory=list)  # [[cid, cid, ...], ...]
     irrelevant: list = field(default_factory=list)  # ticket_ids excluded as evidence
     rank: dict = field(default_factory=dict)  # cluster_id -> {"rank": int, "rationale": str}
+    rejected: list = field(default_factory=list)  # cluster_ids a human rejected as not-a-real-theme
+    reassign: list = field(default_factory=list)  # [{"ticket_id":..., "cluster_id":...}]
+    split: list = field(default_factory=list)  # [{"cluster_id":..., "ticket_ids":[...], "new_id":...}]
 
     def to_json(self) -> str:
         return json.dumps(self.__dict__)
@@ -21,7 +24,8 @@ class Overrides:
     def from_json(s: str) -> Overrides:
         d = json.loads(s)
         return Overrides(rename={int(k): v for k, v in d["rename"].items()}, merge=d["merge"],
-                         irrelevant=d["irrelevant"], rank={int(k): v for k, v in d["rank"].items()})
+                         irrelevant=d["irrelevant"], rank={int(k): v for k, v in d["rank"].items()},
+                         rejected=d.get("rejected", []), reassign=d.get("reassign", []), split=d.get("split", []))
 
 
 class AuditStore:

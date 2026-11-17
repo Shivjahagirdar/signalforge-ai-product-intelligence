@@ -17,6 +17,7 @@ class Assumptions:
     benefit_horizon_months: int = 12
     default_effort_weeks: float = 4.0
     impute_missing_acv: bool = True
+    assumed_acv_per_account: float | None = None  # explicit USER ASSUMPTION for data with no revenue (e.g. public reviews)
     strategic_alignment: dict = field(default_factory=dict)  # cluster_id -> 0.5..1.5, default 1.0
 
     def validated(self) -> Assumptions:
@@ -24,18 +25,26 @@ class Assumptions:
             raise ValueError("Fractions and probabilities must be within [0, 1].")
         if min(self.eng_cost_per_person_week, self.infra_cost_annual, self.support_cost_annual) < 0:
             raise ValueError("Costs must be non-negative.")
+        if self.assumed_acv_per_account is not None and self.assumed_acv_per_account < 0:
+            raise ValueError("Assumed ACV must be non-negative.")
         if self.benefit_horizon_months <= 0 or self.default_effort_weeks <= 0:
             raise ValueError("Horizon and default effort must be positive.")
         return self
 
 
-def resolve_acv(df: pd.DataFrame, impute: bool = True) -> pd.DataFrame:
-    """Add acv_resolved + acv_source (observed | imputed_segment_median | missing)."""
+def resolve_acv(df: pd.DataFrame, impute: bool = True, assumed: float | None = None) -> pd.DataFrame:
+    """Add acv_resolved + acv_source (observed | imputed_segment_median | user_assumption | missing).
+
+    Missing ACV never silently becomes zero: it stays NaN ('missing') unless imputed or explicitly assumed."""
     d = df.copy()
-    seg_med = d.groupby("customer_segment")["annual_contract_value"].transform("median")
-    d["acv_source"] = np.where(d["annual_contract_value"].notna(), "observed",
-                               np.where(impute & seg_med.notna(), "imputed_segment_median", "missing"))
-    d["acv_resolved"] = d["annual_contract_value"].fillna(seg_med if impute else np.nan)
+    acv = pd.to_numeric(d["annual_contract_value"], errors="coerce")
+    seg_med = acv.groupby(d["customer_segment"]).transform("median")
+    use_med = impute & seg_med.notna()
+    d["acv_source"] = np.where(acv.notna(), "observed", np.where(use_med, "imputed_segment_median",
+                               "user_assumption" if assumed is not None else "missing"))
+    d["acv_resolved"] = acv.fillna(seg_med if impute else np.nan)
+    if assumed is not None:
+        d["acv_resolved"] = d["acv_resolved"].fillna(float(assumed))
     return d
 
 

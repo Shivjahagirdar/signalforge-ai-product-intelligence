@@ -8,13 +8,16 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from scipy.sparse import hstack
-from sklearn.cluster import AgglomerativeClustering
+from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import adjusted_rand_score
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import normalize
 
 log = logging.getLogger("signalforge.intelligence")
+LSA_DIMS = 100
+GIANT_SHARE = 0.35  # a 'theme' holding >35% of records is too broad to act on
 
 
 def embed(texts: list[str], prefer_transformer: bool = False) -> tuple[np.ndarray, list[str], str]:
@@ -40,6 +43,10 @@ def embed(texts: list[str], prefer_transformer: bool = False) -> tuple[np.ndarra
             continue
         x = normalize(hstack([w, c]).tocsr())
         if (x.getnnz(axis=1) > 0).all():
+            k = min(LSA_DIMS, x.shape[1] - 1, x.shape[0] - 1)
+            if k >= 20:  # Latent Semantic Analysis: dense, fast, captures co-occurrence beyond exact tokens
+                z = normalize(TruncatedSVD(k, random_state=0).fit_transform(x))
+                return z, list(wv.get_feature_names_out()), "tfidf-word+char+lsa"
             return x.toarray(), list(wv.get_feature_names_out()), "tfidf-word+char"
     raise ValueError("Feedback text has no usable words after normalisation.")
 
@@ -61,16 +68,38 @@ def _label(df: pd.DataFrame, idx, cid: int, gdf: dict, n_all: int) -> str:
     return ", ".join(scored[:3]) if scored else f"cluster {cid}"
 
 
-def cluster_feedback(df: pd.DataFrame, distance_threshold: float = 0.9, prefer_transformer: bool = False) -> pd.DataFrame:
-    """Add cluster_id, cluster_label, cohesion, is_outlier columns. Deterministic."""
+def _auto_k(n: int) -> int:
+    return int(np.clip(round(np.sqrt(n / 2)), 6, 30))
+
+
+def cluster_feedback(df: pd.DataFrame, distance_threshold: float = 0.9, prefer_transformer: bool = False,
+                     method: str = "auto") -> pd.DataFrame:
+    """Add cluster_id, cluster_label, cohesion, is_outlier columns. Deterministic.
+
+    method='auto': average-linkage agglomerative first (best on templated/consistent feedback). If that produces an
+    unusable partition on diverse real-world text - one giant theme (> GIANT_SHARE of records) or heavy fragmentation
+    (>40% of records in clusters smaller than 3) - fall back to K-Means with k = clip(sqrt(n/2), 6, 30).
+    The method actually used is recorded in out.attrs['method']."""
     out = df.copy().reset_index(drop=True)
     x, terms, backend = embed(out["feedback_text"].tolist(), prefer_transformer)
+    used = "single"
     if len(out) < 2:
         out["cluster_id"] = 0
     else:
-        cl = AgglomerativeClustering(n_clusters=None, metric="cosine", linkage="average",
-                                     distance_threshold=distance_threshold)
-        out["cluster_id"] = cl.fit_predict(x)
+        p = None
+        if method in ("auto", "agglomerative"):
+            p = AgglomerativeClustering(n_clusters=None, metric="cosine", linkage="average",
+                                        distance_threshold=distance_threshold).fit_predict(x)
+            used = "agglomerative"
+            sizes = pd.Series(p).value_counts()
+            frag = float(pd.Series(p).map(sizes).lt(3).mean())
+            if method == "auto" and len(out) >= 60 and (sizes.iloc[0] / len(out) > GIANT_SHARE or frag > 0.4):
+                p = None
+        if p is None:
+            k = min(_auto_k(len(out)), len(out))
+            p = KMeans(k, n_init=4, random_state=0).fit_predict(x)
+            used = f"kmeans(k={k})"
+        out["cluster_id"] = p
     sims = cosine_similarity(x) if len(out) < 4000 else None
     labels, coh = {}, {}
     gdf, n_all = _doc_freq(out)
@@ -86,6 +115,7 @@ def cluster_feedback(df: pd.DataFrame, distance_threshold: float = 0.9, prefer_t
     sizes = out["cluster_id"].map(out["cluster_id"].value_counts())
     out["is_outlier"] = sizes < 3
     out.attrs["backend"] = backend
+    out.attrs["method"] = used
     return out
 
 

@@ -1,6 +1,6 @@
 [project]
 name = "signalforge"
-version = "0.1.0"
+version = "2.0.0"
 requires-python = ">=3.11"
 
 [tool.ruff]
@@ -9,6 +9,9 @@ src = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["e2e: real-browser Playwright tests (need a browser)"]
+addopts = "-m 'not e2e'"
+pythonpath = ["."]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

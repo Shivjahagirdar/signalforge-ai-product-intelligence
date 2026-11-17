@@ -1,14 +1,33 @@
 name: ci
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with: { python-version: "3.11", cache: pip }
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: ruff check .
-      - run: pytest -q
-      - run: python scripts/benchmark.py
-      - run: pip install pip-audit && pip-audit -r requirements.txt
+      - name: Unit, property, integration, security tests
+        run: pytest -q
+      - name: Browser E2E (Playwright + Chromium against a live streamlit server)
+        run: |
+          python -m playwright install --with-deps chromium
+          pytest -q -m e2e tests/e2e
+      - name: Clustering benchmark + evaluation (real public data fetched at runtime)
+        run: python scripts/benchmark.py && python scripts/evaluate.py --out /tmp/eval.json
+      - name: Dependency vulnerability audit
+        run: pip install pip-audit && pip-audit -r requirements.txt
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t signalforge .
+      - name: Container starts and passes health check
+        run: |
+          docker run -d -p 8501:8501 --name sf signalforge
+          for i in $(seq 1 40); do curl -fsS http://127.0.0.1:8501/_stcore/health && exit 0; sleep 2; done
+          docker logs sf; exit 1

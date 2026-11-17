@@ -83,3 +83,118 @@ Exposure is hypothetical; evidence quality is a heuristic; synthetic data unless
 ## Next experiment
 Interview 3 accounts behind the #1 item to confirm the problem and willingness to stay/expand.
 """
+
+
+# ---------------- decision pack: opportunity assessment, evidence appendix, roadmap, experiments, decision log ----------------
+def _md_cell(v) -> str:
+    return str(v).replace("|", "/").replace("\n", " ")[:160]
+
+
+def md_table(df: pd.DataFrame) -> str:
+    if df.empty:
+        return "_(none)_"
+    head = "| " + " | ".join(df.columns) + " |\n|" + "---|" * len(df.columns)
+    rows = "\n".join("| " + " | ".join(_md_cell(v) for v in r) + " |" for r in df.itertuples(index=False))
+    return head + "\n" + rows
+
+
+def generate_opportunity_assessment(row: pd.Series, opp: dict, a: Assumptions) -> str:
+    acv_basis = (f"{opp.get('accounts_observed', 0)} observed, {opp.get('accounts_imputed', 0)} imputed (segment median), "
+                 f"{opp.get('accounts_assumed', 0)} user-assumed, {opp.get('accounts_excluded', 0)} unknown")
+    sig = ", ".join(f"{k} {v:.0%}" for k, v in list(opp.get("signal_profile", {}).items())[:5]) or "none detected"
+    tr = opp.get("trend", {})
+    return f"""# Opportunity Assessment: {row['label']}
+
+| | Value | Type |
+|---|---|---|
+| Records / unique accounts | {opp['tickets']} / {opp['unique_accounts']} | Observed fact |
+| Avg severity | {opp['avg_severity']:.2f} | Observed fact |
+| ACV basis | {acv_basis} | Observed / assumption |
+| Unique-account ACV | ${opp['acv_sum_unique']:,.0f} | Observed + assumptions above |
+| Exposure fraction | {row['exposure_fraction']:.0%} | User assumption x severity |
+| Recovery probability | {a.recovery_probability:.0%} | User assumption |
+| Potential exposure | ${row['potential_revenue_exposure']:,.0f} | Model estimate |
+| Net opportunity value | ${row['net_opportunity_value']:,.0f} | Model estimate |
+| Payback | {('%.1f months' % row['payback_months']) if row['payback_months'] else 'n/a'} | Model estimate |
+| Cost of delay | ${row['cost_of_delay_per_month']:,.0f}/month | Model estimate |
+| Evidence sufficiency | {opp.get('evidence_sufficiency', 'n/a')} | Rule-based |
+| Cluster confidence | {row['confidence']:.2f} | Heuristic (not a probability) |
+| Trend | {tr.get('status', 'n/a')} (lift {tr.get('lift')}) | Volume-normalised |
+| Signals | {sig} | Rule-based tags |
+| Churn / renewal outcome | Unknown | Unknown value - not modeled as fact |
+"""
+
+
+def generate_evidence_appendix(opp: dict, clustered: pd.DataFrame, limit: int = 40) -> str:
+    from .copilot import sanitize_evidence
+
+    ev = clustered[clustered["ticket_id"].isin(opp["ticket_ids"])].head(limit)
+    rows = pd.DataFrame({"ticket_id": ev["ticket_id"], "account_id": ev["account_id"], "severity": ev["severity"],
+                         "text": [sanitize_evidence(t)[0][:140] for t in ev["feedback_text"]]})
+    why = ", ".join(f"{w} ({s:.0%})" for w, s in opp.get("shared_terms", []))
+    return (f"# Evidence Appendix: {opp['label']}\n\nWhy grouped - terms shared across records: {why}\n\n"
+            f"Contradicting records: {', '.join(opp.get('contradictions', [])) or 'none found'}\n\n"
+            + md_table(rows) + (f"\n\n_{len(opp['ticket_ids']) - len(ev)} more records not shown._" if len(opp["ticket_ids"]) > limit else ""))
+
+
+def generate_roadmap_md(sel: pd.DataFrame, deferred: pd.DataFrame, capacity: float, used: float, binding: list[str]) -> str:
+    cols = ["label", "effort_weeks", "net_opportunity_value", "confidence"]
+    return (f"# Roadmap Recommendation\nCapacity {capacity:.0f} person-weeks; used {used:.1f} ({used / capacity:.0%}). "
+            f"Binding constraints: {', '.join(binding) or 'none'}.\n\n## Committed\n" + md_table(sel[cols].round(2))
+            + "\n\n## Deferred\n" + md_table(deferred[cols + ["deferral_reason"]].round(2) if "deferral_reason" in deferred else deferred[cols]))
+
+
+def generate_experiment_plan(ranked: pd.DataFrame, k: int = 3) -> str:
+    out = ["# Experiment Plan", "Outcomes below are hypotheses to test, not measured results.\n"]
+    for r in ranked.head(k).itertuples():
+        out.append(f"## {r.label}\n- Hypothesis: fixing this reduces repeat contacts from the {r.unique_accounts} affected accounts.\n"
+                   f"- Method: ship to a subset of affected accounts behind a flag; compare repeat-ticket rate vs. holdout for 30 days.\n"
+                   f"- Primary metric: repeat tickets per affected account. Guardrail: support escalations.\n"
+                   f"- Decision rule: scale if repeat rate drops >=50%; stop if <20%.\n")
+    return "\n".join(out)
+
+
+def generate_decision_log(events: list[tuple]) -> str:
+    return "# Decision Log\n\n" + md_table(pd.DataFrame(events, columns=["timestamp_utc", "event", "detail"]))
+
+
+def markdown_to_docx(md: str) -> bytes:
+    """Minimal, dependency-light Markdown -> DOCX (headings, bullets, tables, paragraphs)."""
+    import io
+    import re
+
+    from docx import Document
+
+    doc = Document()
+    lines = md.splitlines()
+    i = 0
+    while i < len(lines):
+        ln = lines[i].rstrip()
+        if ln.startswith("|") and i + 1 < len(lines) and re.match(r"^\|(\s*-+\s*\|)+", lines[i + 1].replace(":", "-")):
+            header = [c.strip() for c in ln.strip("|").split("|")]
+            body = []
+            i += 2
+            while i < len(lines) and lines[i].startswith("|"):
+                body.append([c.strip() for c in lines[i].strip().strip("|").split("|")])
+                i += 1
+            t = doc.add_table(rows=1 + len(body), cols=len(header))
+            t.style = "Light Grid Accent 1"
+            for j, h in enumerate(header):
+                t.cell(0, j).text = h
+            for r, row in enumerate(body, 1):
+                for j, v in enumerate(row[: len(header)]):
+                    t.cell(r, j).text = v
+            continue
+        clean = re.sub(r"\*\*|__|`", "", ln)
+        if m := re.match(r"^(#{1,4})\s+(.*)", clean):
+            doc.add_heading(m.group(2), level=min(len(m.group(1)), 4))
+        elif re.match(r"^\s*[-*]\s+", clean):
+            doc.add_paragraph(re.sub(r"^\s*[-*]\s+", "", clean), style="List Bullet")
+        elif re.match(r"^\s*\d+\.\s+", clean):
+            doc.add_paragraph(re.sub(r"^\s*\d+\.\s+", "", clean), style="List Number")
+        elif clean.strip():
+            doc.add_paragraph(clean.strip("_"))
+        i += 1
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()

@@ -15,6 +15,16 @@ from .economics import (
     risk_adjusted_priority,
     unique_account_acv,
 )
+from .signals import (
+    add_signal_tags,
+    cluster_signal_profile,
+    contradictory_evidence,
+    high_severity_low_frequency,
+    is_actionable,
+    representative_records,
+    shared_terms,
+    trend,
+)
 
 
 def confidence(cohesion: float, unique_accounts: int, tickets: int) -> float:
@@ -22,12 +32,27 @@ def confidence(cohesion: float, unique_accounts: int, tickets: int) -> float:
     return float(np.clip(0.5 * min(max(cohesion, 0), 1) + 0.3 * min(1, unique_accounts / 5) + 0.2 * min(1, tickets / 20), 0, 1))
 
 
+def evidence_sufficiency(unique_accounts: int, tickets: int, observed_acv_accounts: int) -> str:
+    """Separate from model confidence: is there ENOUGH evidence to act on, regardless of how tight the cluster is?"""
+    if unique_accounts >= 8 and tickets >= 15 and observed_acv_accounts >= 3:
+        return "sufficient"
+    if unique_accounts >= 3 and tickets >= 5:
+        return "directional"
+    return "insufficient"
+
+
 def build_opportunities(clustered: pd.DataFrame, a: Assumptions, ov: Overrides | None = None) -> list[dict]:
     ov = ov or Overrides()
     d = clustered[~clustered["ticket_id"].isin(ov.irrelevant)].copy()
     remap = {c: grp[0] for grp in ov.merge for c in grp}
     d["cluster_id"] = d["cluster_id"].map(lambda c: remap.get(c, c))
-    d = resolve_acv(d, a.impute_missing_acv)
+    d = resolve_acv(d, a.impute_missing_acv, a.assumed_acv_per_account)
+    if "signals" not in d:
+        d = add_signal_tags(d)
+    for sp in ov.split:  # human split: selected records become their own theme
+        d.loc[d["ticket_id"].isin(sp["ticket_ids"]), "cluster_id"] = sp["new_id"]
+    for t in ov.reassign:  # human reassignment of single records survives re-clustering of unrelated data
+        d.loc[d["ticket_id"] == t["ticket_id"], "cluster_id"] = t["cluster_id"]
     opps = []
     for cid, g in d.groupby("cluster_id"):
         if len(g) < 3:  # outliers stay as unclustered evidence, not opportunities
@@ -42,12 +67,19 @@ def build_opportunities(clustered: pd.DataFrame, a: Assumptions, ov: Overrides |
             account_acv=dict(zip(acc_valid["account_id"], acc_valid["acv"])),
             accounts_imputed=int((acc["source"] == "imputed_segment_median").sum()),
             accounts_excluded=int(acc["acv"].isna().sum()),
+            accounts_assumed=int((acc["source"] == "user_assumption").sum()),
+            accounts_observed=int((acc["source"] == "observed").sum()),
             avg_severity=float(g["severity"].mean()), total_frequency=int(g["frequency"].sum()),
             segments=g.groupby("customer_segment")["account_id"].nunique().to_dict(),
             effort_weeks=None if pd.isna(eff) else float(eff), cohesion=float(g["cohesion"].mean()),
             product_area=g["product_area"].mode().iloc[0],
             confidence=confidence(float(g["cohesion"].mean()), acc["account_id"].nunique(), len(g)),
-            renamed=int(cid) in ov.rename))
+            renamed=int(cid) in ov.rename,
+            signal_profile=(prof := cluster_signal_profile(g)), actionable=is_actionable(g, prof), representatives=representative_records(g),
+            shared_terms=shared_terms(g), contradictions=contradictory_evidence(g), trend=trend(g, d),
+            hs_lf=high_severity_low_frequency(g), rejected=int(cid) in ov.rejected,
+            evidence_sufficiency=evidence_sufficiency(acc["account_id"].nunique(), len(g),
+                                                      int((acc["source"] == "observed").sum()))))
     return opps
 
 
@@ -57,9 +89,15 @@ def rank_opportunities(opps: list[dict], a: Assumptions, ov: Overrides | None = 
     for o in opps:
         e = evaluate_opportunity(o, a)
         rice = o["unique_accounts"] * (o["avg_severity"] / 5 * 3) * o["confidence"] / max(e["effort_weeks"], 0.5)
-        rows.append({**{k: v for k, v in o.items() if k not in ("ticket_ids", "account_acv", "segments")}, **e,
+        if o.get("rejected") or not o.get("actionable", True):
+            continue
+        rows.append({**{k: v for k, v in o.items() if k not in ("ticket_ids", "account_acv", "segments", "signal_profile",
+                                                                   "representatives", "shared_terms", "contradictions", "trend")}, **e,
                      "priority": risk_adjusted_priority(e, o["confidence"]), "rice": rice,
-                     "baseline_score": o["avg_severity"] * o["total_frequency"]})
+                     "baseline_score": o["avg_severity"] * o["total_frequency"],
+                     "trend_status": o.get("trend", {}).get("status", "insufficient_dates"),
+                     "dominant_segment": max(o["segments"], key=o["segments"].get) if o.get("segments") else "Unknown",
+                     "top_signals": ", ".join(list(o.get("signal_profile", {}))[:3])})
     df = pd.DataFrame(rows)
     if df.empty:
         return df

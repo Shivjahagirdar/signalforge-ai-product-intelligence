@@ -1,0 +1,78 @@
+{
+  "env": {
+    "python": "3.13.18",
+    "machine": "x86_64"
+  },
+  "labelled": [
+    {
+      "dataset": "synthetic templates (labelled)",
+      "n": 1025,
+      "method": "agglomerative",
+      "backend": "tfidf-word+char+lsa",
+      "n_clusters": 12,
+      "ari": 0.999,
+      "nmi": 0.992,
+      "purity": 1.0,
+      "pairwise_precision": 1.0,
+      "pairwise_recall": 0.998,
+      "false_merge_rate": 0.0,
+      "false_split_rate": 0.0016,
+      "seconds": 0.36
+    },
+    {
+      "dataset": "held-out paraphrases + typos (labelled)",
+      "n": 280,
+      "method": "agglomerative",
+      "backend": "tfidf-word+char+lsa",
+      "n_clusters": 36,
+      "ari": 0.302,
+      "nmi": 0.703,
+      "purity": 0.982,
+      "pairwise_precision": 0.949,
+      "pairwise_recall": 0.205,
+      "false_merge_rate": 0.0018,
+      "false_split_rate": 0.7952,
+      "seconds": 0.11
+    }
+  ],
+  "unlabelled": [
+    {
+      "dataset": "fdroid_reviews (real)",
+      "n": 1500,
+      "method": "kmeans(k=27)",
+      "backend": "tfidf-word+char+lsa",
+      "n_clusters": 27,
+      "largest_cluster_share": 0.095,
+      "noise_rate": 0.0,
+      "silhouette_cosine": 0.119,
+      "stability_ari_mean": 0.135,
+      "stability_ari_min": 0.127,
+      "topic_diversity": 0.533,
+      "seconds": 1.05
+    }
+  ],
+  "not_run": [
+    {
+      "dataset": "bitext_support",
+      "reason": "Could not reach the dataset host (URLError). Try again later or upload a CSV."
+    }
+  ],
+  "latency": [
+    {
+      "records": 976,
+      "seconds": 0.54,
+      "budget_s": 5.0
+    },
+    {
+      "records": 4857,
+      "seconds": 3.15,
+      "budget_s": 30.0
+    }
+  ],
+  "peak_rss_mb": 511.2,
+  "budget": {
+    "1000": 5.0,
+    "5000": 30.0,
+    "peak_rss_mb": 1536
+  }
+}
