@@ -31,7 +31,7 @@ from signalforge.synthetic import generate
 
 st.set_page_config(page_title="SignalForge AI", page_icon="◆", layout="wide")
 st.markdown("""<style>
-.block-container{padding-top:1.2rem;max-width:1360px}
+.block-container{padding-top:3.2rem;max-width:1360px}
 h1,h2,h3{letter-spacing:-.01em}
 [data-testid=stMetricValue]{font-size:1.45rem;font-weight:650}
 [data-testid=stMetricLabel]{color:#8a94a6}
@@ -42,6 +42,15 @@ h1,h2,h3{letter-spacing:-.01em}
 .sf-muted{color:#8a94a6;font-size:.85rem}
 </style>""", unsafe_allow_html=True)
 fmt = lambda v: "n/a" if v is None or pd.isna(v) else f"${v:,.0f}"  # noqa: E731
+
+
+def short(v: float) -> str:
+    if v is None or pd.isna(v):
+        return "n/a"
+    for div, suf in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(v) >= div:
+            return f"${v / div:.1f}{suf}"
+    return f"${v:,.0f}"
 
 # ---------------- per-visitor state (in-memory; never shared, never written to disk) ----------------
 ss = st.session_state
@@ -224,12 +233,12 @@ if page == "Executive Dashboard":
                 ss.onboarded = True; st.rerun()
     st.markdown(f'<div class="sf-banner">{insight_banner()}</div>', unsafe_allow_html=True)
     c = st.columns(6)
-    c[0].metric("Records analysed", f"{len(ingest.df):,}", help=f"{ingest.dropped_rows} rejected, {ingest.duplicates_removed} exact duplicates removed")
-    c[1].metric("Unique accounts", f"{ingest.df.account_id.nunique():,}")
-    c[2].metric("Actionable themes", len(ranked), help=f"{sum(not o['actionable'] for o in opps)} non-actionable chatter clusters excluded")
-    c[3].metric("Exposure (scenario)", fmt(portfolio_total([o for o in opps if o["actionable"]], a)),
+    c[0].metric("Records", f"{len(ingest.df):,}", help=f"{ingest.dropped_rows} rejected, {ingest.duplicates_removed} exact duplicates removed")
+    c[1].metric("Accounts", f"{ingest.df.account_id.nunique():,}")
+    c[2].metric("Themes", len(ranked), help=f"{sum(not o['actionable'] for o in opps)} non-actionable chatter clusters excluded")
+    c[3].metric("Exposure*", short(portfolio_total([o for o in opps if o["actionable"]], a)),
                 help="Each account counted once at its max exposure fraction. Scenario estimate, not churn.")
-    c[4].metric("Roadmap value (optimised)", fmt(plan.total_value), help=f"{len(plan.selected)} items in {cons.capacity_weeks:.0f} person-weeks")
+    c[4].metric("Plan value", short(plan.total_value), help=f"{len(plan.selected)} items in {cons.capacity_weeks:.0f} person-weeks")
     c[5].metric("Data quality", f"{dq['score']:.0f}/100", help=str({k: f'{v:.0%}' for k, v in dq['components'].items()}))
     for w in ingest.warnings + notes:
         st.caption(f"Data note: {w}")

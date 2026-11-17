@@ -129,7 +129,7 @@ def test_upload_malformed_empty_and_independent_session(base_url, browser, tmp_p
         for i in range(60)))
     page.locator('input[type="file"]').set_input_files(str(good))      # 20-21 independent upload, core analysis repeats
     _wait(page, "NO REVENUE DATA")
-    _wait(page, "Actionable themes")
+    _wait(page, "Themes")
     other = browser.new_context().new_page()                          # 25 separate visitor session
     other.goto(base_url)
     _wait(other, "SYNTHETIC DEMO")
