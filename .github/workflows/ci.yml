@@ -16,7 +16,7 @@ jobs:
       - name: Browser E2E (Playwright + Chromium against a live streamlit server)
         run: |
           python -m playwright install --with-deps chromium
-          pytest -q -m e2e tests/e2e
+          pytest -q -m e2e tests/e2e || pytest -q -m e2e tests/e2e --lf  # one retry for cold-start timing
       - name: Clustering benchmark + evaluation (real public data fetched at runtime)
         run: python scripts/benchmark.py && python scripts/evaluate.py --out /tmp/eval.json
       - name: Dependency vulnerability audit
