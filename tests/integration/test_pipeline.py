@@ -27,8 +27,9 @@ def test_clustering_is_deterministic():
 def test_demo_scenario_integration_fix_outranks_cosmetic(clustered):
     a = Assumptions()
     r = rank_opportunities(build_opportunities(clustered, a), a)
-    integ = r[r.label.str.contains("salesforce")].iloc[0]
-    dark = r[r.label.str.contains("dark|theme|bright", regex=True)].iloc[0]
+    truth = clustered.groupby("cluster_id")["ground_truth_issue"].agg(lambda s: s.mode().iloc[0])
+    integ = r[r.cluster_id.map(truth) == "integration_sync"].iloc[0]
+    dark = r[r.cluster_id.map(truth) == "dark_mode"].iloc[0]
     assert integ.final_rank < dark.final_rank
     assert integ.unique_accounts < dark.unique_accounts and integ.acv_sum_unique > dark.acv_sum_unique
     assert integ.baseline_rank > dark.baseline_rank or integ.model_rank < dark.model_rank

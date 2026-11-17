@@ -11,8 +11,8 @@ import streamlit as st
 from signalforge.audit import AuditStore, Overrides
 from signalforge.economics import Assumptions, monte_carlo, tornado
 from signalforge.exports import generate_memo, generate_prd
-from signalforge.ingestion import IngestionError, load_csv, safe_csv, validate
-from signalforge.intelligence import cluster_feedback, near_duplicates
+from signalforge.ingestion import REQUIRED, IngestionError, load_csv, safe_csv, validate
+from signalforge.intelligence import cluster_feedback, near_duplicates, suggest_merges
 from signalforge.pipeline import build_opportunities, explain_outranks, portfolio_total, rank_opportunities, scenario_ranks
 from signalforge.synthetic import generate
 
@@ -23,8 +23,8 @@ st.markdown("""<style>
 .sf-badge{background:#fff3cd;color:#664d03;padding:.2rem .6rem;border-radius:6px;font-size:.8rem}
 </style>""", unsafe_allow_html=True)
 
-if "store" not in st.session_state:
-    st.session_state.store = AuditStore("signalforge_audit.db")
+if "store" not in st.session_state:  # per-visitor, in-memory: nothing is shared between sessions or written to disk
+    st.session_state.store = AuditStore(":memory:")
 store: AuditStore = st.session_state.store
 
 
@@ -36,6 +36,9 @@ def run_clustering(df: pd.DataFrame, thr: float) -> pd.DataFrame:
 # ---------------- Sidebar: data + assumptions ----------------
 st.sidebar.title("SignalForge AI")
 src = st.sidebar.radio("Data source", ["Synthetic demo (1,000 records)", "Upload CSV"])
+st.sidebar.download_button("Download CSV template", ",".join(REQUIRED) + "\n", "signalforge_template.csv", "text/csv")
+st.sidebar.download_button("Download demo dataset", safe_csv(generate().drop(columns=["ground_truth_issue"])),
+                           "signalforge_demo.csv", "text/csv")
 ingest = None
 try:
     if src.startswith("Synthetic"):
@@ -43,7 +46,7 @@ try:
     else:
         up = st.sidebar.file_uploader("Feedback CSV", type=["csv"])
         if up is None:
-            st.info("Upload a CSV with columns: ticket_id, account_id, customer_segment, annual_contract_value, "
+            st.info("Use the template download in the sidebar. Upload a CSV with columns: ticket_id, account_id, customer_segment, annual_contract_value, "
                     "product_area, feedback_text, severity, frequency, created_at, status, estimated_engineering_effort. "
                     "Do not upload data containing PII you are not authorised to process.")
             st.stop()
@@ -68,6 +71,11 @@ if st.sidebar.button("Reset local data & overrides"):
     st.rerun()
 
 clustered = run_clustering(ingest.df, thr)
+sig = (src, len(ingest.df), thr, str(ingest.df["ticket_id"].iloc[0]))
+if st.session_state.get("sig") != sig:  # cluster ids change with data/threshold, so stale overrides must not carry over
+    if st.session_state.get("sig") is not None:
+        store.save_overrides(Overrides()); store.log("overrides_cleared", "Data source or threshold changed")
+    st.session_state["sig"] = sig
 ov: Overrides = store.load_overrides()
 opps = build_opportunities(clustered, a, ov)
 ranked = rank_opportunities(opps, a, ov)
@@ -115,6 +123,13 @@ elif page == "Customer Intelligence":
     c2.plotly_chart(px.bar(ranked, x="label", y="tickets", title="Tickets per theme"), use_container_width=True)
     nd = near_duplicates(ingest.df)
     st.write(f"Exact duplicates removed at ingestion: **{ingest.duplicates_removed}** - near-duplicate same-account pairs flagged: **{len(nd)}**")
+    st.subheader("Suggested merges (clusters that may be paraphrases of one problem)")
+    sm = suggest_merges(clustered)
+    if sm.empty:
+        st.caption("No similar cluster pairs found.")
+    else:
+        lab = clustered.drop_duplicates("cluster_id").set_index("cluster_id")["cluster_label"]
+        st.dataframe(sm.assign(label_a=sm.cluster_a.map(lab), label_b=sm.cluster_b.map(lab)), use_container_width=True)
     st.subheader("Evidence drill-down & human corrections")
     cid = st.selectbox("Theme", ranked.cluster_id, format_func=lambda i: f"{i}: {by_id[i]['label']}")
     st.dataframe(clustered[clustered.ticket_id.isin(by_id[cid]["ticket_ids"])][["ticket_id", "account_id", "feedback_text"]],

@@ -2,37 +2,63 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.feature_extraction.text import TfidfVectorizer
+from scipy.sparse import hstack
 from sklearn.metrics import adjusted_rand_score
+from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import cosine_similarity
 
 log = logging.getLogger("signalforge.intelligence")
 
 
 def embed(texts: list[str], prefer_transformer: bool = False) -> tuple[np.ndarray, list[str], str]:
-    """Return (matrix, vocabulary terms, backend). Falls back to TF-IDF if the model is unavailable."""
+    """Return (matrix, vocabulary terms, backend).
+
+    Order: sentence-transformers (optional, needs a model download) -> hybrid word+char TF-IDF (offline, deterministic).
+    Char n-grams add robustness to typos and word forms; they do NOT understand true paraphrases (see docs/AI-evaluation.md).
+    """
     if prefer_transformer:
-        try:  # optional dependency; never required
+        try:  # optional dependency; never required, never verified offline
             from sentence_transformers import SentenceTransformer
 
             m = SentenceTransformer("all-MiniLM-L6-v2")
             return np.asarray(m.encode(texts, normalize_embeddings=True)), [], "sentence-transformers"
         except Exception as exc:  # noqa: BLE001
-            log.warning("transformer unavailable (%s); using TF-IDF", type(exc).__name__)
+            log.warning("transformer unavailable (%s); using TF-IDF fallback", type(exc).__name__)
     for min_df in (2, 1):  # min_df=1 fallback avoids all-zero rows on tiny/very diverse inputs
-        vec = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), min_df=min_df, sublinear_tf=True)
         try:
-            x = vec.fit_transform(texts)
+            wv = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), min_df=min_df, sublinear_tf=True)
+            cv = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5), min_df=min_df, sublinear_tf=True)
+            w, c = wv.fit_transform(texts), cv.fit_transform(texts)
         except ValueError:  # empty vocabulary
             continue
+        x = normalize(hstack([w, c]).tocsr())
         if (x.getnnz(axis=1) > 0).all():
-            return x.toarray(), list(vec.get_feature_names_out()), "tfidf"
+            return x.toarray(), list(wv.get_feature_names_out()), "tfidf-word+char"
     raise ValueError("Feedback text has no usable words after normalisation.")
+
+
+def _doc_freq(df: pd.DataFrame) -> tuple[dict, int]:
+    from collections import Counter
+
+    stop = TfidfVectorizer(stop_words="english").get_stop_words()
+    c = Counter(w for t in df["feedback_text"] for w in set(re.findall(r"[a-z]{4,}", t.lower())) if w not in stop)
+    return dict(c), len(df)
+
+
+def _label(df: pd.DataFrame, idx, cid: int, gdf: dict, n_all: int) -> str:
+    """Label = 3 words most distinctive for this cluster (cluster share x inverse global frequency); no invented text."""
+    from collections import Counter
+
+    local = Counter(w for t in df["feedback_text"].iloc[idx] for w in set(re.findall(r"[a-z]{4,}", t.lower())) if w in gdf)
+    scored = sorted(local, key=lambda w: -(local[w] / len(idx)) * np.log(1 + n_all / gdf[w]))
+    return ", ".join(scored[:3]) if scored else f"cluster {cid}"
 
 
 def cluster_feedback(df: pd.DataFrame, distance_threshold: float = 0.9, prefer_transformer: bool = False) -> pd.DataFrame:
@@ -47,9 +73,10 @@ def cluster_feedback(df: pd.DataFrame, distance_threshold: float = 0.9, prefer_t
         out["cluster_id"] = cl.fit_predict(x)
     sims = cosine_similarity(x) if len(out) < 4000 else None
     labels, coh = {}, {}
+    gdf, n_all = _doc_freq(out)
     for cid, idx in out.groupby("cluster_id").indices.items():
         cent = x[idx].mean(axis=0)
-        labels[cid] = ", ".join(terms[i] for i in np.argsort(cent)[::-1][:3]) if terms else f"cluster {cid}"
+        labels[cid] = _label(out, idx, cid, gdf, n_all)
         if sims is not None and len(idx) > 1:
             sub = sims[np.ix_(idx, idx)]
             coh[cid] = float((sub.sum() - len(idx)) / (len(idx) * (len(idx) - 1)))
@@ -95,3 +122,16 @@ def evaluate_clustering(truth: pd.Series, pred: pd.Series, min_cluster: int = 3)
     sizes = pd.Series(p).value_counts()
     cov = float(pd.Series(p).map(sizes).ge(min_cluster).mean())
     return ClusterMetrics(float(adjusted_rand_score(t, p)), prec, rec, cov, len(sizes))
+
+
+def suggest_merges(clustered: pd.DataFrame, top_n: int = 5, min_similarity: float = 0.15) -> pd.DataFrame:
+    """Suggest cluster pairs a human may want to merge (centroid similarity). Mitigates over-splitting on paraphrases."""
+    x, _, _ = embed(clustered["feedback_text"].tolist())
+    ids = sorted(clustered["cluster_id"].unique())
+    cent = np.vstack([x[(clustered["cluster_id"] == c).to_numpy()].mean(axis=0) for c in ids])
+    sim = cosine_similarity(cent)
+    sizes = clustered["cluster_id"].value_counts()
+    rows = [(ids[i], ids[j], float(sim[i, j])) for i in range(len(ids)) for j in range(i + 1, len(ids))
+            if sizes[ids[i]] >= 3 and sizes[ids[j]] >= 3 and sim[i, j] >= min_similarity]
+    out = pd.DataFrame(rows, columns=["cluster_a", "cluster_b", "similarity"])
+    return out.sort_values("similarity", ascending=False).head(top_n).reset_index(drop=True)

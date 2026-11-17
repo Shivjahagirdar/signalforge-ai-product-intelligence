@@ -24,21 +24,28 @@ Upload CSV -> validate/dedupe -> cluster themes -> unique-account exposure -> RO
 pip install -r requirements.txt
 streamlit run app.py
 ```
-Docker: `docker build -t signalforge . && docker run -p 8501:8501 signalforge`
+Docker (not yet build-verified): `docker build -t signalforge . && docker run -p 8501:8501 signalforge`
 
 ## Tests and benchmark
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                      # 21 tests (unit, integration, app smoke)
+pytest -q                      # unit, integration, held-out wording, interactive app flows
 python scripts/benchmark.py    # synthetic clustering benchmark
 ```
-Last local run: 21 passed; ARI 0.999, pairwise precision 1.000 / recall 0.998 on synthetic data (see `docs/AI-evaluation.md` for why this is not real-world accuracy).
+Last local run: all tests passed, ruff clean, pip-audit found no known vulnerabilities in `requirements.txt`.
+
+| Clustering benchmark | ARI | Precision | Recall |
+|---|---|---|---|
+| Synthetic templates (inflated: shared keywords) | 0.999 | 1.000 | 0.998 |
+| **Held-out paraphrases / typos (unseen wording)** | **0.30** | 0.95 | 0.21 |
+
+On unseen wording, TF-IDF keeps clusters pure but **over-splits** one issue into several. The app offers a threshold slider, "Suggested merges", and manual merge/rename controls. Sentence-transformers is supported but could not be run in the build sandbox (see `docs/AI-evaluation.md`). Real-customer accuracy is unmeasured.
 
 ## Docs
 [PRD](docs/PRD.md) - [Competitive gap analysis (hypotheses)](docs/competitive-gap-analysis.md) - [Personas](docs/customer-personas.md) - [Opportunity tree](docs/opportunity-solution-tree.md) - [Prioritisation](docs/prioritization-framework.md) - [Architecture](docs/architecture.md) - [Decision log](docs/decision-log.md) - [Unit economics & GTM](docs/go-to-market.md) - [Threat model](docs/security-threat-model.md) - [AI evaluation](docs/AI-evaluation.md) - [Executive memo](docs/executive-investment-memo.md) - [Case study](docs/principal-pm-case-study.md)
 
 ## Limitations
-Not proven on real data; competitor claims unverified (research backlog); no auth/multi-tenancy; exposure is a scenario estimate, not churn prediction; no live demo URL yet.
+Not proven on real data; clustering recall on paraphrases is low (see above); Docker image and GitHub Actions not yet run; no screenshots yet; competitor claims unverified (research backlog); no auth/multi-tenancy; exposure is a scenario estimate, not churn prediction; no live demo URL yet.
 
 ## Roadmap
 Validate with 5 interviews -> real-data pilot -> Zendesk/Salesforce import -> multi-tenant auth.
