@@ -17,7 +17,10 @@ from sklearn.preprocessing import normalize
 
 log = logging.getLogger("signalforge.intelligence")
 LSA_DIMS = 100
-GIANT_SHARE = 0.35  # a 'theme' holding >35% of records is too broad to act on
+GIANT_SHARE = 0.35
+# Theme labels are shown to executives: keep profanity out of labels (the evidence itself is never altered).
+LABEL_BLOCKLIST = {"fuck", "fucking", "shit", "bullshit", "crap", "crappy", "damn", "sucks", "stupid", "idiot", "idiots",
+                   "garbage", "trash", "hell", "dumb", "worst", "gay", "retarded", "piece"}  # a 'theme' holding >35% of records is too broad to act on
 
 
 def embed(texts: list[str], prefer_transformer: bool = False) -> tuple[np.ndarray, list[str], str]:
@@ -64,7 +67,7 @@ def _label(df: pd.DataFrame, idx, cid: int, gdf: dict, n_all: int) -> str:
     from collections import Counter
 
     local = Counter(w for t in df["feedback_text"].iloc[idx] for w in set(re.findall(r"[a-z]{4,}", t.lower())) if w in gdf)
-    scored = sorted(local, key=lambda w: -(local[w] / len(idx)) * np.log(1 + n_all / gdf[w]))
+    scored = sorted((w for w in local if w not in LABEL_BLOCKLIST), key=lambda w: -(local[w] / len(idx)) * np.log(1 + n_all / gdf[w]))
     return ", ".join(scored[:3]) if scored else f"cluster {cid}"
 
 

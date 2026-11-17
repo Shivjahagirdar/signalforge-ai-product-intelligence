@@ -80,7 +80,7 @@ def validate(df: pd.DataFrame) -> IngestionResult:
         res.warnings.append(f"{res.acv_filled_from_account} missing ACV values filled from the same account's other tickets.")
     still = d.loc[d["annual_contract_value"].isna(), "account_id"].nunique()
     if still:
-        res.warnings.append(f"{still} accounts have no ACV; economics will impute segment median or exclude them.")
+        res.warnings.append(f"{still} accounts have no ACV; economics will impute a segment median, use your explicit assumption, or exclude them.")
     d["_norm"] = d["feedback_text"].map(norm_text)
     dup = d.duplicated(subset=["account_id", "_norm"], keep="first")
     res.duplicates_removed = int(dup.sum())

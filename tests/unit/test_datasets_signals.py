@@ -104,3 +104,11 @@ def test_bitext_adapter_stratified_sampling_keeps_all_intents():
     raw = pd.DataFrame({"instruction": [f"request text number {i}" for i in range(n)], "category": "ORDER", "intent": intents})
     out = adapt_bitext(raw, sample=500)
     assert 400 <= len(out) <= 600 and out.ground_truth_issue.nunique() == 27
+
+
+def test_theme_labels_exclude_profanity_but_evidence_is_untouched():
+    from signalforge.intelligence import cluster_feedback
+
+    texts = ["this bullshit app crashes on startup"] * 6 + ["export to pdf is broken again"] * 6
+    c = cluster_feedback(pd.DataFrame({"ticket_id": [str(i) for i in range(12)], "feedback_text": texts}))
+    assert not any("bullshit" in lbl for lbl in c.cluster_label) and c.feedback_text.str.contains("bullshit").sum() == 6

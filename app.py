@@ -150,6 +150,9 @@ sig = (src, len(ingest.df), thr, str(ingest.df["ticket_id"].iloc[0]))
 if ss.get("sig") != sig:  # cluster ids change with data/threshold: stale overrides must not silently carry over
     if ss.get("sig") is not None:
         store.save_overrides(Overrides()); store.log("overrides_cleared", "Data source or threshold changed")
+        for k in ("mandatory", "deps"):  # constraints reference cluster ids of the previous data
+            ss.pop(k, None)
+        ss.chat = []  # SIGNAL answers were about the previous dataset
     ss["sig"] = sig
 ov: Overrides = store.load_overrides()
 opps = build_opportunities(clustered, a, ov)
@@ -209,6 +212,9 @@ def signal_panel(selected: int | None = None) -> None:
 
 def insight_banner() -> str:
     r0 = ranked.iloc[0]
+    if (ranked.net_opportunity_value <= 0).all():
+        return ("<b>SIGNAL:</b> At the current assumptions no theme pays for its engineering cost. Treat this as a pain map, "
+                "not a business case - or bring real revenue data.")
     hs = ranked[(ranked.avg_severity >= 4) & (ranked.final_rank > 3)]
     if not hs.empty:
         x = hs.iloc[0]
