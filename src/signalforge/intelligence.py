@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 
@@ -20,10 +21,50 @@ LSA_DIMS = 100
 GIANT_SHARE = 0.35
 # Theme labels are shown to executives: keep profanity out of labels (the evidence itself is never altered).
 LABEL_BLOCKLIST = {"fuck", "fucking", "shit", "bullshit", "crap", "crappy", "damn", "sucks", "stupid", "idiot", "idiots",
-                   "garbage", "trash", "hell", "dumb", "worst", "gay", "retarded", "piece"}  # a 'theme' holding >35% of records is too broad to act on
+                   "garbage", "trash", "hell", "dumb", "worst", "gay", "retarded", "piece"}
+# Semantic backend: Model2Vec static embeddings (MIT, ~30 MB, numpy-only, no torch). Downloaded once from Hugging Face.
+SEMANTIC_MODEL = os.environ.get("SF_SEMANTIC_MODEL", "minishlab/potion-base-8M")
+SEMANTIC_WEIGHT = float(os.environ.get("SF_SEMANTIC_WEIGHT", "0.7"))  # share of cosine similarity from semantics (rest: LSA)
+_SEM_CACHE: dict = {}
 
 
-def embed(texts: list[str], prefer_transformer: bool = False) -> tuple[np.ndarray, list[str], str]:
+def semantic_enabled() -> bool:
+    return os.environ.get("SF_SEMANTIC", "auto").lower() not in ("0", "off", "false")
+
+
+def _semantic_model():
+    """Load once per process; None (with the reason logged) when the package or model download is unavailable."""
+    if "model" in _SEM_CACHE:
+        return _SEM_CACHE["model"]
+    model = None
+    if semantic_enabled():
+        try:
+            from model2vec import StaticModel
+
+            model = StaticModel.from_pretrained(SEMANTIC_MODEL)
+        except Exception as exc:  # noqa: BLE001 - offline / blocked host / missing package -> lexical fallback
+            log.warning("semantic backend unavailable (%s); using LSA only", type(exc).__name__)
+    _SEM_CACHE["model"] = model
+    return model
+
+
+def embed(texts: list[str], prefer_transformer: bool = False, semantic: bool | None = None,
+          weight: float | None = None) -> tuple[np.ndarray, list[str], str]:
+    """Hybrid embedding. cosine(hybrid) = w * cosine(semantic) + (1 - w) * cosine(LSA) because each half is unit-norm
+    and scaled by sqrt(w) / sqrt(1-w). Falls back to lexical LSA when the semantic model is unavailable."""
+    x, terms, backend = _lexical(texts, prefer_transformer)
+    use = semantic_enabled() if semantic is None else semantic
+    model = _semantic_model() if use else None
+    w = SEMANTIC_WEIGHT if weight is None else weight
+    if model is None or backend == "sentence-transformers" or w <= 0:
+        return x, terms, backend
+    sem = normalize(np.asarray(model.encode(list(texts)), dtype=float))
+    if w >= 1:
+        return sem, terms, "model2vec"
+    return np.hstack([np.sqrt(w) * sem, np.sqrt(1 - w) * x]), terms, f"model2vec({w:.1f})+{backend}"
+
+
+def _lexical(texts: list[str], prefer_transformer: bool = False) -> tuple[np.ndarray, list[str], str]:
     """Return (matrix, vocabulary terms, backend).
 
     Order: sentence-transformers (optional, needs a model download) -> hybrid word+char TF-IDF (offline, deterministic).

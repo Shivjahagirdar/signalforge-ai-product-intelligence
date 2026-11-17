@@ -6,3 +6,4 @@ streamlit>=1.40,<2
 plotly>=5.20,<8
 pydantic>=2.6,<3
 python-docx>=1.1,<2
+model2vec>=0.6,<1
