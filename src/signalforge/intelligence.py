@@ -75,7 +75,6 @@ def cluster_feedback(df: pd.DataFrame, distance_threshold: float = 0.9, prefer_t
     labels, coh = {}, {}
     gdf, n_all = _doc_freq(out)
     for cid, idx in out.groupby("cluster_id").indices.items():
-        cent = x[idx].mean(axis=0)
         labels[cid] = _label(out, idx, cid, gdf, n_all)
         if sims is not None and len(idx) > 1:
             sub = sims[np.ix_(idx, idx)]
