@@ -117,8 +117,8 @@ def adapt_app_reviews(df: pd.DataFrame, source: str = "fdroid_reviews", sample: 
 
 def adapt_bitext(df: pd.DataFrame, sample: int = 1500, seed: int = 11) -> pd.DataFrame:
     d = df.dropna(subset=["instruction"]).copy()
-    if len(d) > sample:
-        d = d.groupby("intent", group_keys=False).apply(lambda g: g.sample(min(len(g), sample // 27 + 1), random_state=seed))
+    if len(d) > sample:  # stratified by intent (keeps every intent represented)
+        d = d.groupby("intent", group_keys=False).sample(frac=sample / len(d), random_state=seed)
     n = len(d)
     sev = {"complaint": 4, "payment_issue": 4, "registration_problems": 4, "get_refund": 4, "track_refund": 3}
     out = pd.DataFrame(dict(

@@ -96,3 +96,11 @@ def test_trend_is_volume_normalised():
     g = pd.DataFrame({"created_at": list(dates[::10])})  # theme volume flat over time
     t = trend(g, all_df)
     assert t["status"] in ("stable", "falling")  # growth in total volume must not make a flat theme 'rising'
+
+
+def test_bitext_adapter_stratified_sampling_keeps_all_intents():
+    n = 3000
+    intents = [f"intent_{i % 27}" for i in range(n)]
+    raw = pd.DataFrame({"instruction": [f"request text number {i}" for i in range(n)], "category": "ORDER", "intent": intents})
+    out = adapt_bitext(raw, sample=500)
+    assert 400 <= len(out) <= 600 and out.ground_truth_issue.nunique() == 27

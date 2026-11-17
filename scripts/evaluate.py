@@ -23,7 +23,7 @@ from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score, s
 from signalforge.datasets import load_public  # noqa: E402
 from signalforge.economics import Assumptions  # noqa: E402
 from signalforge.heldout import generate_heldout  # noqa: E402
-from signalforge.ingestion import IngestionError, validate  # noqa: E402
+from signalforge.ingestion import validate  # noqa: E402
 from signalforge.intelligence import cluster_feedback, embed, evaluate_clustering  # noqa: E402
 from signalforge.pipeline import build_opportunities, rank_opportunities  # noqa: E402
 from signalforge.synthetic import generate  # noqa: E402
@@ -92,8 +92,8 @@ def main() -> None:
     for key in ("bitext_support", "fdroid_reviews"):
         try:
             d = load_public(key)
-        except IngestionError as exc:
-            res["not_run"].append(dict(dataset=key, reason=str(exc)))
+        except Exception as exc:  # noqa: BLE001 - record, don't crash the whole evaluation
+            res["not_run"].append(dict(dataset=key, reason=f"{type(exc).__name__}: {exc}"[:300]))
             continue
         if "ground_truth_issue" in d:
             res["labelled"].append(labelled_metrics(d, f"{key} (real, labelled intents)"))
