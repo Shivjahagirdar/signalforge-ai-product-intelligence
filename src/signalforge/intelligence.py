@@ -7,12 +7,12 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from scipy.sparse import hstack
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.feature_extraction.text import TfidfVectorizer
-from scipy.sparse import hstack
 from sklearn.metrics import adjusted_rand_score
-from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.preprocessing import normalize
 
 log = logging.getLogger("signalforge.intelligence")
 
