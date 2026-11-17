@@ -5,7 +5,7 @@
 SignalForge turns fragmented customer feedback into evidence-backed, financially-modeled, capacity-feasible product
 decisions — and an AI strategist (**SIGNAL**) that argues with you about them using your actual numbers.
 
-**Live demo:** _see "Deployment status" below_ · **CI:** GitHub Actions (`.github/workflows/ci.yml`)
+**Live demo:** https://signalforge-decision-os.streamlit.app · **CI:** [GitHub Actions](https://github.com/Shivjahagirdar/signalforge-ai-product-intelligence/actions) (tests, real-browser E2E, live-data evaluation, pip-audit, Docker)
 
 ![Executive dashboard](docs/screenshots/01-executive-dashboard.png)
 
@@ -43,6 +43,7 @@ Third-party data is fetched at runtime and never committed. Full registry: [`doc
 |---|---|
 | Synthetic templates (labelled) | ARI 0.999, NMI 0.992, purity 1.00 |
 | Held-out paraphrases + typos (labelled) | ARI 0.302, purity 0.98, **false-split 0.80** (known lexical limitation) |
+| Bitext customer-service, 27 real intents (labelled, CI) | ARI 0.638, NMI 0.843, stability 0.93; related intents merged (purity 0.69) |
 | Real F-Droid reviews (1,500) | 27 themes, largest 9.5%, silhouette 0.12, subsample stability ARI 0.13; previously 287 fragments |
 | Latency | 976 records 0.54 s · 4,857 records 3.15 s (budgets 5 s / 30 s, set beforehand) |
 | Tests | 108 unit/property/integration/security + 2 real-browser E2E journeys passing locally |
@@ -72,6 +73,8 @@ Technical: [architecture](docs/architecture.md) · [financial & prioritisation m
 [deployment](docs/deployment.md) · [limitations](docs/limitations.md)
 
 ## Deployment status
-See [`BUILD_STATUS.md`](BUILD_STATUS.md) for what is verified, with evidence.
+Live on Streamlit Community Cloud: https://signalforge-decision-os.streamlit.app (verified 2026-11-17 in a real browser:
+demo load, capacity recalculation, override + audit, SIGNAL challenge, real F-Droid dataset, and a second visitor session
+with no leakage). Evidence and open items: [`BUILD_STATUS.md`](BUILD_STATUS.md).
 
 License: MIT (project code). Third-party datasets keep their own terms (see provenance registry).

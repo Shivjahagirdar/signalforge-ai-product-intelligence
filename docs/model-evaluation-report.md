@@ -14,9 +14,11 @@ clusters smaller than 3, it falls back to K-Means with k = clip(sqrt(n/2), 6, 30
 |---|---|---|---|---|---|---|---|---|---|---|
 | Synthetic templates | 1,025 | agglomerative | 12 | 0.999 | 0.992 | 1.000 | 1.000 | 0.998 | 0.000 | 0.002 |
 | Held-out paraphrases + typos | 280 | agglomerative | 36 | 0.302 | 0.703 | 0.982 | 0.949 | 0.205 | 0.002 | 0.795 |
+| **Bitext customer-service (real/NLG, 27 intents)** - measured in CI run 44176412865 | 1,500 | agglomerative | 15 | **0.638** | **0.843** | 0.689 | 0.537 | 0.863 | 0.043 | 0.137 |
 
-Reading: clusters that form are pure (few false merges), but lexical features **over-split true paraphrases** (false-split
-0.80). The UI mitigates with merge suggestions + human merge/split; the real fix is a sentence-embedding backend, which is
+Reading: on templates and held-out paraphrases, clusters that form are pure but lexical features **over-split true
+paraphrases** (false-split 0.80). On Bitext's 27 real intents the opposite trade-off appears: 15 themes, related intents
+merged (e.g. order/refund families; purity 0.69), with high recall (0.86) and **stability ARI 0.93** across subsamples. The UI mitigates with merge suggestions + human merge/split; the real fix is a sentence-embedding backend, which is
 implemented as optional but not enabled by default (memory budget, unverifiable offline).
 
 ## Real, unlabelled data (F-Droid Google Play reviews, 1-3★ sample)
@@ -27,8 +29,10 @@ implemented as optional but not enabled by default (memory budget, unverifiable 
 Reading: themes are usable and balanced, but **partition stability is low** on diverse multi-app review text. Treat
 real-data themes as triage starting points, which is why every theme exposes evidence sufficiency and human controls.
 
+Bitext unlabelled view (CI): silhouette 0.276, largest theme 16.8%, topic diversity 0.76, 0.31 s.
+
 ## Not run
-* Bitext labelled intents - host unreachable from the build sandbox (runs in CI / deployed app where reachable).
+* Bitext was unreachable from the build sandbox; its numbers above come from the GitHub Actions run, which fetches it live.
 * Human-review agreement - requires reviewers; planned measurement (see experimentation plan).
 
 ## Robustness (automated tests, pass/fail)
