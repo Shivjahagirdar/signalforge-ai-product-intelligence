@@ -1,0 +1,11 @@
+rows=996 backend=tfidf clusters=12 latency=0.2s
+ARI=0.999 pairwise_precision=1.000 recall=0.998 coverage=1.000
+ final_rank                                  label  unique_accounts  acv_sum_unique  net_opportunity_value  baseline_rank
+          1            sync, salesforce, connector               12       5465813.0          976384.181818              6
+          2                    app, crash, startup               25       2524270.0          381521.573333              3
+          3                   report, export, slow               30       3820850.0          427223.769231              4
+          4                   api, rate, throttled               22       2300237.0          297687.380727              5
+          5                audit, logs, compliance               10       3743023.0          578507.987170              7
+          6      comment roadmap, comment, roadmap                4       1125944.0           36037.760000              8
+          7 sure, following report, following rate                4       1061835.0           33473.400000              9
+          8          overall, great product, great                4        674725.0           17989.000000             10
