@@ -116,6 +116,32 @@ def _auto_k(n: int) -> int:
     return int(np.clip(round(np.sqrt(n / 2)), 6, 30))
 
 
+ADAPTIVE_GRID = tuple(np.round(np.arange(0.45, 0.96, 0.05), 2))
+ADAPTIVE_MAX_N = 3000  # the dendrogram is O(n^2) memory; larger inputs use the fixed threshold
+
+
+def adaptive_cut(x: np.ndarray) -> tuple[np.ndarray, float]:
+    """Unsupervised threshold choice: build the average-linkage cosine dendrogram once, cut it on a grid, keep the cut
+    with the best silhouette among partitions with 2..n/3 clusters. No labels are used."""
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from sklearn.metrics import silhouette_score
+
+    n = len(x)
+    z = linkage(x, method="average", metric="cosine")
+    best, best_s, best_t = None, -2.0, float(ADAPTIVE_GRID[-1])
+    for t in ADAPTIVE_GRID:
+        lab = fcluster(z, t=float(t), criterion="distance") - 1
+        k = int(lab.max()) + 1
+        if k < 2 or k > max(n // 3, 2):
+            continue
+        sc = float(silhouette_score(x, lab, metric="cosine", sample_size=min(n, 1500), random_state=0))
+        if sc > best_s:
+            best, best_s, best_t = lab, sc, float(t)
+    if best is None:
+        best = fcluster(z, t=float(ADAPTIVE_GRID[-1]), criterion="distance") - 1
+    return best, best_t
+
+
 def cluster_feedback(df: pd.DataFrame, distance_threshold: float = 0.9, prefer_transformer: bool = False,
                      method: str = "auto") -> pd.DataFrame:
     """Add cluster_id, cluster_label, cohesion, is_outlier columns. Deterministic.
@@ -131,7 +157,10 @@ def cluster_feedback(df: pd.DataFrame, distance_threshold: float = 0.9, prefer_t
         out["cluster_id"] = 0
     else:
         p = None
-        if method in ("auto", "agglomerative"):
+        if method == "adaptive" and 3 <= len(out) <= ADAPTIVE_MAX_N:
+            p, t_used = adaptive_cut(x)
+            used = f"adaptive(t={t_used:.2f})"
+        elif method in ("auto", "agglomerative", "adaptive"):
             p = AgglomerativeClustering(n_clusters=None, metric="cosine", linkage="average",
                                         distance_threshold=distance_threshold).fit_predict(x)
             used = "agglomerative"
