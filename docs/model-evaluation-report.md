@@ -21,6 +21,28 @@ paraphrases** (false-split 0.80). On Bitext's 27 real intents the opposite trade
 merged (e.g. order/refund families; purity 0.69), with high recall (0.86) and **stability ARI 0.93** across subsamples. The UI mitigates with merge suggestions + human merge/split; the real fix is a sentence-embedding backend, which is
 implemented as optional but not enabled by default (memory budget, unverifiable offline).
 
+## Semantic (Model2Vec) matching: measured trade-off (CI run 44179711099, branch `tune/semantic`)
+Hybrid embedding = w x Model2Vec(potion-base-8M) + (1-w) x lexical LSA. Grid over w x cluster-breadth, ARI per labelled set
+(`scripts/tune_semantic.py`, reproducible from the `semantic-eval` workflow):
+
+| w | breadth | synthetic ARI | held-out paraphrase ARI | Bitext ARI |
+|---|---|---|---|---|
+| 0.0 (lexical default) | 0.90 | **0.999** (at 0.9 in the app default flow) | 0.302 | 0.638 |
+| 0.85 | 0.80 | 0.368 | **0.759** | 0.644 |
+| 0.85 | 0.90 | 0.368 | 0.631 | 0.644 |
+| 0.70 | 0.70 | 0.999 | 0.335 | 0.518 |
+
+Finding: **no single setting wins on every dataset.** Semantic matching more than doubles held-out paraphrase ARI
+(0.30 -> 0.76) and holds Bitext, but loosens tightly-templated data (synthetic 0.999 -> 0.37 at the same breadth).
+Decision: the deterministic lexical backend stays the default; semantic matching is an opt-in sidebar toggle
+("Semantic matching (beta)") that applies the measured breadth 0.80 and falls back to lexical, with a visible warning, if
+the model cannot be downloaded. The 0.759 figure is the best cell of a 20-cell grid evaluated on the same data it was
+selected on, so treat it as optimistic.
+
+**Negative result:** an unsupervised "adaptive cut" (choose the dendrogram threshold by best silhouette) was tried on the
+same grid and did **not** help (held-out ARI 0.25 at every w; silhouette always picks the lowest threshold and fragments the
+data). It was reverted; the code is in history (commit 7896b99).
+
 ## Real, unlabelled data (F-Droid Google Play reviews, 1-3★ sample)
 | n | Method | Clusters | Largest share | Silhouette (cos) | Stability ARI (3x 80% subsamples) | Topic diversity | Time |
 |---|---|---|---|---|---|---|---|

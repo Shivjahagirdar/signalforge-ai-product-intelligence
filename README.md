@@ -17,9 +17,14 @@ decisions — and an AI strategist (**SIGNAL**) that argues with you about them 
 | **Technical approach** | Schema detection & column mapping → validation, dedup, data-quality score → word+char TF-IDF → LSA → auto agglomerative / K-Means clustering | `datasets.py`, `ingestion.py`, `intelligence.py` |
 | **AI intelligence** | Explainable themes (shared terms, representative + contradicting records), signal tags, volume-normalised trends, evidence sufficiency vs model confidence; SIGNAL copilot with 10-field grounded recommendations | `signals.py`, `pipeline.py`, `copilot.py` |
 | **Financial decision** | Unique-account exposure (no double counting), ROI, payback, cost of delay, Monte Carlo, 7 prioritisation frameworks, weight sensitivity, **integer-programming roadmap** under capacity/budget/dependencies | `economics.py`, `prioritization.py`, `optimizer.py` |
-| **Product impact** | Decision pack: memo, PRD, opportunity assessment, evidence appendix, roadmap, experiment plan, decision log (MD + DOCX) | `exports.py` |
+| **Product impact** | Decision pack: memo, PRD, opportunity assessment, evidence appendix, roadmap, experiment plan, decision log (MD + DOCX + PDF) | `exports.py` |
 
 Business outcomes of using SignalForge have **not** been measured; the experimentation plan defines how they would be.
+
+## Friendly by design
+A guided 6-step tracker and a **Next step →** button on every page, plain-language page blurbs, colour-coded KPI cards, a
+chat-style SIGNAL, one-click **Save analysis / Load saved analysis** (client-held JSON: no accounts, no server storage) and
+an opt-in **Semantic matching (beta)** toggle for paraphrase-heavy feedback.
 
 ## The six pages (+ SIGNAL on every page)
 | Page | Highlights |
@@ -29,7 +34,7 @@ Business outcomes of using SignalForge have **not** been measured; the experimen
 | Opportunity Economics | fact/assumption/estimate/unknown separation, formulas, value vs investment, bear/base/bull, P10–P90 |
 | Roadmap Optimizer | framework selector + custom weights + segment importance, framework comparison, sensitivity, capacity/budget/confidence/mandatory/dependencies, optimal vs greedy vs alternative plan, overrides, exports |
 | Scenario Lab | capacity & recovery shocks, seeded Monte Carlo, tornado, decision threshold, uncertainty histogram |
-| Decision Memo & PRD | seven generated documents (MD/DOCX), full decision pack, audit trail export |
+| Decision Memo & PRD | seven generated documents (MD / DOCX / PDF), full decision pack, audit trail export, in-session product metrics |
 
 ![SIGNAL copilot](docs/screenshots/06-signal-copilot.png)
 
@@ -42,7 +47,7 @@ Third-party data is fetched at runtime and never committed. Full registry: [`doc
 | | Result |
 |---|---|
 | Synthetic templates (labelled) | ARI 0.999, NMI 0.992, purity 1.00 |
-| Held-out paraphrases + typos (labelled) | ARI 0.302, purity 0.98, **false-split 0.80** (known lexical limitation) |
+| Held-out paraphrases + typos (labelled) | ARI 0.302, purity 0.98, **false-split 0.80** with the default lexical backend; **ARI 0.76** with opt-in Semantic matching (CI grid; no setting wins on every dataset, see report) |
 | Bitext customer-service, 27 real intents (labelled, CI) | ARI 0.638, NMI 0.843, stability 0.93; related intents merged (purity 0.69) |
 | Real F-Droid reviews (1,500) | 27 themes, largest 9.5%, silhouette 0.12, subsample stability ARI 0.13; previously 287 fragments |
 | Latency | 976 records 0.54 s · 4,857 records 3.15 s (budgets 5 s / 30 s, set beforehand) |

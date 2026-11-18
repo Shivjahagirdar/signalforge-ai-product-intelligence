@@ -48,7 +48,11 @@ def browser():
 
 
 def _wait(page, text, timeout=120_000, state="visible"):
-    page.get_by_text(text, exact=False).first.wait_for(timeout=timeout, state=state)
+    try:
+        page.get_by_text(text, exact=False).first.wait_for(timeout=timeout, state=state)
+    except pw.TimeoutError as exc:  # show what the page actually said: a bare timeout hides server-side errors
+        body = page.inner_text("body")[:1800].replace("\n", " | ")
+        raise AssertionError(f"waiting for {text!r}; page said: {body}") from exc
 
 
 def _nav(page, name):
