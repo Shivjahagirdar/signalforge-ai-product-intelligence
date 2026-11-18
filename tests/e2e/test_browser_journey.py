@@ -24,7 +24,10 @@ def _free_port():
 @pytest.fixture(scope="module")
 def base_url():
     if os.environ.get("SF_E2E_URL"):
-        yield os.environ["SF_E2E_URL"]; return
+        url = os.environ["SF_E2E_URL"].rstrip("/")
+        if url.endswith(".streamlit.app"):  # Community Cloud wraps the app in an iframe; /~/+/ serves the app itself
+            url += "/~/+/"
+        yield url; return
     port = _free_port()
     proc = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(ROOT / "app.py"), "--server.headless=true",
                              f"--server.port={port}", "--browser.gatherUsageStats=false"], cwd=ROOT,
