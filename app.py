@@ -10,6 +10,9 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
 
+from signalforge import evidence_quality as EQ
+from signalforge import lifecycle as LC
+from signalforge import telemetry as TM
 from signalforge.audit import AuditStore, Overrides
 from signalforge.copilot import CopilotState, answer, llm_available, narrate_with_llm, sanitize_evidence
 from signalforge.datasets import REGISTRY, coerce_to_schema, data_quality, load_public
@@ -25,6 +28,7 @@ from signalforge.exports import (
     markdown_to_docx,
     markdown_to_pdf,
 )
+from signalforge.github_sync import sync_repo
 from signalforge.ingestion import MAX_BYTES, REQUIRED, IngestionError, safe_csv, validate
 from signalforge.intelligence import SEMANTIC_THRESHOLD, cluster_feedback, near_duplicates, suggest_merges
 from signalforge.metrics import session_metrics
@@ -33,6 +37,7 @@ from signalforge.persistence import restore as restore_snapshot
 from signalforge.persistence import snapshot
 from signalforge.pipeline import build_opportunities, explain_outranks, portfolio_total, rank_opportunities, scenario_ranks
 from signalforge.prioritization import FRAMEWORKS, Weights, compare_frameworks, score, weight_sensitivity
+from signalforge.store import Store, StoreError, new_workspace_id, valid_workspace_id
 from signalforge.synthetic import generate
 
 st.set_page_config(page_title="SignalForge AI", page_icon="◆", layout="wide")
@@ -90,6 +95,9 @@ div[data-testid=stVerticalBlockBorderWrapper]{border-radius:18px}
  box-shadow:0 10px 22px -18px rgba(76,29,149,.6)}
 .sf-banner b{color:var(--p)}
 .sf-muted{color:#8a94a6;font-size:.85rem}
+.sf-sim{background:#e0e7ff;color:#3730a3}
+.sf-card{border-radius:16px;padding:.9rem 1.1rem;margin:.3rem 0;border:1px solid #eee}
+.sf-good{background:#ecfdf5;border-color:#a7f3d0}.sf-mid{background:#fffbeb;border-color:#fde68a}.sf-bad{background:#fff1f2;border-color:#fecdd3}
 </style>""", unsafe_allow_html=True)
 st.markdown('<div class="sf-hero"><div class="sf-logo">◆</div><div><div class="sf-brand">SignalForge AI</div>'
             '<div class="sf-tag">Your customers are telling you what to build. SignalForge tells you what deserves the budget.</div></div></div>',
@@ -113,6 +121,18 @@ if "store" not in ss:
     ss.onboarded = False
     ss.t0 = time.time()
 store: AuditStore = ss.store
+
+
+@st.cache_resource
+def durable_store() -> Store:
+    return Store()  # SIGNALFORGE_DB or data/signalforge.db: survives reloads/sessions, not a platform redeploy
+
+
+DB = durable_store()
+if "ws" not in ss:
+    qp = st.query_params.get("ws", "")
+    ss.ws = qp if valid_workspace_id(qp) and DB.workspace_exists(qp) else DB.ensure_workspace(new_workspace_id())
+WS: str = ss.ws
 
 
 @st.cache_data(show_spinner="Finding themes in your feedback...", max_entries=8)
@@ -148,8 +168,8 @@ def _on_restore() -> None:
 
 
 # ---------------- sidebar: data ----------------
-PAGES = ["Executive Dashboard", "Customer Intelligence", "Opportunity Economics", "Roadmap Optimizer", "Scenario Lab", "Decision Memo & PRD"]
-ICON = dict(zip(PAGES, ["📊", "🧠", "💰", "🗺️", "🧪", "📝"]))
+PAGES = ["Executive Dashboard", "Customer Intelligence", "Opportunity Economics", "Roadmap Optimizer", "Decision Loop", "Scenario Lab", "Decision Memo & PRD"]
+ICON = dict(zip(PAGES, ["📊", "🧠", "💰", "🗺️", "🔁", "🧪", "📝"]))
 st.sidebar.markdown("##### Where to?")
 page = st.sidebar.radio("Navigate", PAGES, key="page", format_func=lambda n: f"{ICON[n]}  {n}", label_visibility="collapsed")
 st.sidebar.markdown("---")
@@ -189,11 +209,29 @@ try:
             raise IngestionError("That file has no rows. Here's exactly what needs fixing: add at least 3 feedback records.")
         df_in, notes = coerce_to_schema(df_in)
         ingest = validate(df_in)
+    elif src == "github_issues":
+        repo = st.sidebar.text_input("Public repo (owner/name)", "streamlit/streamlit", key="gh_repo").strip()
+        key_src = f"github:{repo}"
+        have = DB.feedback(WS, key_src) if repo else []
+        cs1, cs2 = st.sidebar.columns(2)
+        do_sync = cs1.button("Sync now", key="gh_sync", help="Incremental: only issues updated since the last sync")
+        full = cs2.button("Full resync", key="gh_full")
+        if (do_sync or full or not have) and repo:
+            with st.spinner("Syncing GitHub issues (paginated, retried, rate-limit aware)..."):
+                rep = sync_repo(DB, WS, repo, full=full)
+            ss.gh_report = rep
+            have = DB.feedback(WS, key_src)
+        info = DB.get_sync(WS, key_src) if repo else None
+        if info:
+            st.sidebar.caption(f"Last sync {info['last_run']} UTC - {info['last_status']}. Cursor: {info['cursor'] or 'none'}. "
+                               f"{len(have)} issues stored in your workspace.")
+        for w_ in getattr(ss.get("gh_report"), "warnings", []):
+            st.sidebar.caption(f"Note: {w_}")
+        if not have:
+            raise IngestionError("No issues found for that repository yet.")
+        ingest = validate(pd.DataFrame(have).drop(columns=["updated_at", "source_url"], errors="ignore"))
     else:
-        repo = None
-        if src == "github_issues":
-            repo = st.sidebar.text_input("Public repo (owner/name)", "streamlit/streamlit")
-        ingest = validate(fetch_public(src, repo))
+        ingest = validate(fetch_public(src, None))
 except IngestionError as e:
     st.error(f"That file isn't cooperating. {e}")
     st.stop()
@@ -238,6 +276,18 @@ if st.sidebar.button("↺ Reset my session", key="reset", help="Clears data, ove
     store.reset(); ss.chat = []
     st.rerun()
 
+with st.sidebar.expander("🔑 Your workspace"):
+    st.code(WS, language=None)
+    st.caption("Decisions, tickets, releases, outcomes and GitHub syncs are saved to this workspace. Bookmark "
+               f"`?ws={WS}` or paste the key below to resume later. Hosted demo storage resets on redeploy.")
+    other = st.text_input("Resume workspace key", key="ws_resume")
+    if st.button("Open workspace", key="b_ws_open"):
+        if valid_workspace_id(other.strip()) and DB.workspace_exists(other.strip()):
+            ss.ws = other.strip(); st.query_params["ws"] = ss.ws; st.rerun()
+        else:
+            st.error("No workspace with that key.")
+st.sidebar.caption("Analysis state is per browser session. Workspace data is isolated by key and enforced in every database query.")
+
 # ---------------- analysis ----------------
 clustered = run_clustering(ingest.df, thr, bool(semantic))
 if semantic and "model2vec" not in str(clustered.attrs.get("backend")):
@@ -270,6 +320,7 @@ opps = build_opportunities(clustered, a, ov)
 ranked = rank_opportunities(opps, a, ov)
 by_id = {o["cluster_id"]: o for o in opps}
 dq = data_quality(ingest.df)
+quality = {o['cluster_id']: EQ.assess(o, clustered) for o in opps}
 if ranked.empty:
     st.warning("This theme needs more evidence before it earns roadmap space: no actionable cluster has 3+ records. "
                "Try a broader cluster setting or more data.")
@@ -283,12 +334,13 @@ if not has_acv:
     pill += '<span class="sf-pill sf-warn">NO REVENUE DATA - $ values use your assumption</span>'
 st.markdown(pill, unsafe_allow_html=True)
 
-STEPS = ["Pick data", "Review themes", "Check the money", "Plan the roadmap", "Stress-test", "Share the decision"]
+STEPS = ["Pick data", "Review themes", "Check the money", "Plan the roadmap", "Close the loop", "Stress-test", "Share the decision"]
 BLURB = {
     "Executive Dashboard": "The 30-second answer: what matters most right now, and why.",
     "Customer Intelligence": "What customers are actually saying, grouped into themes you can inspect, fix and trust.",
     "Opportunity Economics": "What each theme could be worth, what it costs, and exactly how every number is calculated.",
     "Roadmap Optimizer": "Set your capacity and constraints; get the best-value plan and see what you are giving up.",
+    "Decision Loop": "Approve a decision, create the ticket and PRD, ship it, then measure whether it actually worked.",
     "Scenario Lab": "Change the assumptions and watch the decision hold up (or fall apart).",
     "Decision Memo & PRD": "Everything you need to take this to the room: memo, PRD, evidence, audit trail.",
 }
@@ -317,7 +369,8 @@ def signal_panel(selected: int | None = None) -> None:
                    ("LLM narration on (server-side key)." if llm_available() else "Deterministic analytics (no LLM key needed)."))
         quick = ["What should we build next?", "Which three issues threaten the most revenue?", "Why is this cluster ranked first?",
                  "What happens if engineering capacity drops 30%?", "What would a CFO prioritize?", "Which recommendations have weak evidence?",
-                 "What are we ignoring?", "Challenge this roadmap.", "What assumptions would reverse this decision?", "Run the decision debate"]
+                 "What are we ignoring?", "Challenge this roadmap.", "What assumptions would reverse this decision?", "Run the decision debate",
+                 "How solid is the evidence?", "Did the release work?"]
         cols = st.columns(5)
         clicked = None
         for i, qq in enumerate(quick):
@@ -327,7 +380,9 @@ def signal_panel(selected: int | None = None) -> None:
         if st.button("Ask", key=f"askbtn_{page}") and q:
             clicked = q
         if clicked:
-            stt = CopilotState(ranked, by_id, a, cons, page, selected, "synthetic" if is_synth else "real")
+            decs = DB.decisions(WS)
+            stt = CopilotState(ranked, by_id, a, cons, page, selected, "synthetic" if is_synth else "real",
+                               loop={"decisions": decs, "outcomes": {d_.id: DB.outcomes(WS, d_.id) for d_ in decs}, "quality": quality})
             rec = answer(stt, clicked)
             text = narrate_with_llm(rec) if llm_available() else None
             ss.chat.insert(0, (clicked, text or rec.to_markdown(), rec.table))
@@ -361,12 +416,14 @@ def insight_banner() -> str:
 if page == "Executive Dashboard":
     st.title("Executive Dashboard")
     st.markdown(f'<div class="sf-blurb">{BLURB["Executive Dashboard"]}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sf-banner">🔁 <b>Full loop:</b> evidence-linked themes → revenue economics → capacity-feasible roadmap → '
+                'human-approved decision → ticket + PRD → release → measured outcome. Run it in <b>Decision Loop</b>.</div>', unsafe_allow_html=True)
     signal_panel()
     if not ss.onboarded:
         with st.container(border=True):
             st.markdown("**First time here?** 1) Pick a dataset in the sidebar (synthetic demo or real public data). "
                         "2) Review themes in *Customer Intelligence*. 3) Tune assumptions and see *Economics* recalculate. "
-                        "4) Set capacity in *Roadmap Optimizer*. 5) Ask SIGNAL to challenge it. 6) Export the memo.")
+                        "4) Set capacity in *Roadmap Optimizer*. 5) Ask SIGNAL to challenge it. 6) Run the *Decision Loop*: approve → ticket → release → measure. 7) Export the memo.")
             if st.button("Got it", key="onb"):
                 ss.onboarded = True; st.rerun()
     st.markdown(f'<div class="sf-banner">{insight_banner()}</div>', unsafe_allow_html=True)
@@ -649,8 +706,182 @@ elif page == "Scenario Lab":
 
     next_step()
 
+
+# ================= DECISION LOOP (closed-loop vertical slice) =================
+elif page == "Decision Loop":
+    st.title("Decision Loop")
+    signal_panel()
+    decs = DB.decisions(WS)
+    stages = ["1 · Propose", "2 · Approve", "3 · Ticket + PRD", "4 · Release", "5 · Measure outcome"]
+    reached = {"proposed": 1, "approved": 2, "rejected": 1, "in_delivery": 3, "released": 4, "measured": 5, "reverted": 1}
+    cur = max([reached[d_.status] for d_ in decs], default=0)
+    st.markdown('<div class="sf-steps">' + "".join(
+        f'<div class="sf-step {"done" if i < cur else "now" if i == cur else ""}">{"✅ " if i < cur else ""}{s_}</div>'
+        for i, s_ in enumerate(stages)) + "</div>", unsafe_allow_html=True)
+    st.caption(f"Workspace `{WS}` · stored durably in SQLite ({'file' if DB.durable else 'memory'}). Every action below is "
+               "permission-checked, audited and reversible.")
+
+    # ---- 1. propose ----
+    with st.container(border=True):
+        st.subheader("1 · Propose a decision from evidence")
+        pick = st.selectbox("Opportunity", ranked.label, key="loop_pick")
+        row = ranked[ranked.label == pick].iloc[0]
+        o = by_id[int(row.cluster_id)]
+        qd = quality[int(row.cluster_id)]
+        cls = {"strong": "sf-good", "moderate": "sf-mid", "weak": "sf-bad"}[qd["grade"]]
+        m = st.columns(4)
+        m[0].metric("Rank", f"#{int(row.final_rank)}")
+        m[1].metric("Accounts", int(row.unique_accounts))
+        m[2].metric("Modeled net value", short(row.net_opportunity_value), help="Assumption-based; see Opportunity Economics")
+        m[3].metric("Evidence quality", f"{qd['score']:.0%}", help="Weighted share of 8 deterministic checks")
+        st.markdown(f'<div class="sf-card {cls}"><b>Evidence: {qd["grade"].upper()}</b> · top-account share {qd["top_account_share"]:.0%} · '
+                    f'contradictions {qd["contradiction_share"]:.0%} · sources {qd["sources"]}<br>{qd["next_step"]}</div>', unsafe_allow_html=True)
+        if qd["missing"]:
+            st.caption("Missing: " + " · ".join(qd["missing"]))
+        c1, c2, c3 = st.columns([1, 2, 1])
+        owner = c1.text_input("Decision owner", key="loop_owner", placeholder="e.g. Shivani (PM)")
+        why = c2.text_input("Rationale (required)", key="loop_why", placeholder="Why this, why now?")
+        tgt = c3.number_input("Target adoption %", 1, 100, 50, key="loop_tgt")
+        if st.button("Propose decision", key="b_propose", type="primary"):
+            try:
+                did = LC.propose(DB, WS, row, o, clustered, a, owner, why, tgt / 100, actor=owner or "user")
+                st.success(f"Decision #{did} proposed. Next: approve it below.")
+                decs = DB.decisions(WS)
+            except StoreError as e:
+                st.error(str(e))
+
+    if not decs:
+        st.info("No decisions yet. Propose one above to unlock approval, ticketing, release and outcome measurement.")
+        st.stop()
+
+    # ---- 2. approve ----
+    with st.container(border=True):
+        st.subheader("2 · Human approval")
+        dmap = {d_.id: d_ for d_ in decs}
+        sel = st.selectbox("Decision", list(dmap), key="loop_dec", format_func=lambda i: f"#{i} · {dmap[i].cluster_label} · {dmap[i].status}")
+        d = DB.get_decision(WS, sel)
+        st.markdown(f"**Owner:** {d.owner} · **Status:** `{d.status}` · **Rationale:** {d.rationale}  \n"
+                    f"Evidence IDs: {', '.join(d.evidence_ids[:8])}{' …' if len(d.evidence_ids) > 8 else ''}")
+        note = st.text_input("Approval / rejection note (required)", key="loop_note")
+        b1, b2, b3 = st.columns(3)
+        act = None
+        if b1.button("✅ Approve", key="b_approve", disabled=d.status != "proposed"):
+            act = ("approved", note)
+        if b2.button("✖ Reject", key="b_reject", disabled=d.status != "proposed"):
+            act = ("rejected", note)
+        if b3.button("↩ Revert decision", key="b_revert", disabled=d.status in ("proposed", "rejected", "reverted"),
+                     help="Reversible: moves it to 'reverted'; history is kept in the audit log"):
+            act = ("reverted", note)
+        if act:
+            try:
+                DB.transition(WS, d.id, act[0], d.owner, act[1]); st.rerun()
+            except StoreError as e:
+                st.error(str(e))
+
+    # ---- 3. ticket + PRD ----
+    with st.container(border=True):
+        st.subheader("3 · Engineering ticket + PRD (preview before create)")
+        od = by_id.get(next((cid for cid, oo in by_id.items() if oo["label"] == d.cluster_label), -1))
+        if od is None:
+            st.warning("This decision's theme isn't in the current dataset/threshold; switch back to create its ticket.")
+        else:
+            rowd = ranked[ranked.cluster_id == od["cluster_id"]]
+            t_title, t_body = LC.ticket_markdown(d, od)
+            with st.expander(f"Preview: {t_title}", expanded=d.status == "approved"):
+                st.markdown(t_body)
+            existing = DB.tickets(WS, d.id)
+            if existing:
+                tk = existing[0]
+                st.success(f"Ticket #{tk['id']} created {tk['created_at']} UTC.")
+                x1, x2, x3 = st.columns(3)
+                x1.download_button("Ticket (.md)", f"# {tk['title']}\n\n{tk['body']}", f"ticket_{tk['id']}.md", key="dl_ticket")
+                x2.download_button("PRD (.md)", tk["prd"], f"prd_decision_{d.id}.md", key="dl_tprd")
+                x3.download_button("PRD (.pdf)", markdown_to_pdf(tk["prd"], "PRD"), f"prd_decision_{d.id}.pdf", "application/pdf", key="dl_tprd_pdf")
+            elif st.button("Create ticket", key="b_ticket", disabled=d.status != "approved" or rowd.empty,
+                           help="Only approved decisions get tickets"):
+                try:
+                    LC.create_ticket(DB, WS, d.id, od, rowd.iloc[0], a, d.owner); st.rerun()
+                except StoreError as e:
+                    st.error(str(e))
+
+    # ---- 4. release ----
+    with st.container(border=True):
+        st.subheader("4 · Record the release")
+        rels = DB.releases(WS, d.id)
+        if rels:
+            st.success(f"Released {rels[0]['version']} on {rels[0]['released_at']}.")
+        else:
+            r1, r2, r3 = st.columns([1, 1, 2])
+            ver = r1.text_input("Version", "v1.0", key="rel_ver")
+            rdate = r2.date_input("Release date", pd.Timestamp("2026-09-01").date(), key="rel_date")
+            rnotes = r3.text_input("Release notes", key="rel_notes")
+            if st.button("Record release", key="b_release", disabled=d.status != "in_delivery"):
+                try:
+                    DB.add_release(WS, d.id, ver, str(rdate), rnotes, d.owner); st.rerun()
+                except StoreError as e:
+                    st.error(str(e))
+
+    # ---- 5. outcome ----
+    with st.container(border=True):
+        st.subheader("5 · Did it work? Measure the outcome")
+        tsrc = st.radio("Telemetry", ["Simulated sample (labelled)", "Upload event CSV"], horizontal=True, key="tel_src")
+        events, label = None, ""
+        if tsrc.startswith("Simulated"):
+            lift = st.slider("Simulation ground truth: true adoption lift injected", -0.2, 0.4, 0.15, 0.01, key="tel_lift",
+                             help="Known parameter so you can check the evaluator recovers it. NOT real behaviour.")
+            st.markdown('<span class="sf-pill sf-sim">SIMULATED TELEMETRY - illustrative, not measured</span>', unsafe_allow_html=True)
+            rd = rels[0]["released_at"] if rels else "2026-09-01"
+            events = TM.simulate_events([d.feature_key, "reports", "search", "exports"], d.feature_key, rd, lift)
+            label = f"SIMULATED (true lift {lift:+.0%})"
+        else:
+            st.caption("Columns: " + ", ".join(TM.EVENT_COLUMNS) + f". event_name in {sorted(TM.EVENT_NAMES)}. Feature key for this "
+                       f"decision: `{d.feature_key}`.")
+            upt = st.file_uploader("Events CSV (max 10 MB)", type=["csv"], key="tel_up")
+            if upt is not None:
+                try:
+                    events = TM.read_events_csv(upt.getvalue()); label = "YOUR TELEMETRY (uploaded)"
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"That telemetry file isn't cooperating: {e}")
+        if events is not None:
+            feats = TM.feature_catalog(events)
+            feat = st.selectbox("Feature to evaluate", feats, index=feats.index(d.feature_key) if d.feature_key in feats else 0,
+                                key="tel_feat") if feats else d.feature_key
+            k = st.columns(3)
+            k[0].metric("Events", f"{len(events):,}")
+            k[1].metric("Accounts", events.account_id.nunique())
+            k[2].metric("Activation (7-day)", f"{TM.activation_rate(events):.0%}", help="first key_action within 7 days of signup")
+        if st.button("Measure outcome", key="b_measure", type="primary", disabled=events is None or d.status not in ("released", "measured")):
+            try:
+                ss.last_outcome = LC.measure(DB, WS, d.id, events, label, feat, d.owner)
+                if ss.last_outcome["verdict"] != "too_early":
+                    st.rerun()
+            except (StoreError, ValueError, TM.TelemetryError) as e:
+                st.error(str(e))
+        outs = DB.outcomes(WS, d.id)
+        res = ss.get("last_outcome") if ss.get("last_outcome", {}).get("verdict") == "too_early" else (outs[0] if outs else None)
+        if res:
+            if res["verdict"] == "too_early":
+                st.warning(res["explanation"])
+            else:
+                vcls = {"worked": "sf-good", "improved_below_target": "sf-mid", "inconclusive": "sf-mid"}.get(res["verdict"], "sf-bad")
+                emoji = {"worked": "🎉", "improved_below_target": "📈", "inconclusive": "🤔", "regressed": "📉", "guardrail_breached": "⚠️"}
+                st.markdown(f'<div class="sf-card {vcls}"><b>{emoji.get(res["verdict"], "")} Verdict: {res["verdict"].replace("_", " ")}</b> '
+                            f'· {res.get("data_label", label)}<br>{res["forecast"]["summary"]}</div>', unsafe_allow_html=True)
+                g = pd.DataFrame({"window": ["28 days before", "28 days after"], "adoption": [res["adoption_pre"], res["adoption_post"]]})
+                st.plotly_chart(px.bar(g, x="window", y="adoption", color="window", text_auto=".0%",
+                                       color_discrete_sequence=["#c4b5fd", "#ec4899"]).update_layout(
+                    height=260, showlegend=False, yaxis_tickformat=".0%", margin=dict(l=0, r=0, t=10, b=0)), width="stretch")
+                st.caption(f"Method: {res['method']}. Lift 90% CI {res['lift_ci90'][0]:+.1%} to {res['lift_ci90'][1]:+.1%}. "
+                           f"Retention {res['retention_prior']:.0%} → {res['retention_post']:.0%}.")
+
+    with st.expander("Workspace audit log (durable)"):
+        al = pd.DataFrame(DB.audit_events(WS))
+        st.dataframe(al, width="stretch", hide_index=True)
+        if not al.empty:
+            st.download_button("Export audit log (.csv)", safe_csv(al), "workspace_audit.csv", "text/csv", key="dl_wsaudit")
+
 # ================= PAGE 6 =================
-else:
+elif page == "Decision Memo & PRD":
     st.title("Executive Decision Memo")
     st.markdown(f'<div class="sf-blurb">{BLURB["Decision Memo & PRD"]}</div>', unsafe_allow_html=True)
     signal_panel()
@@ -702,4 +933,3 @@ st.sidebar.markdown("---")
 if spec:
     with st.sidebar.expander("Data provenance"):
         st.markdown(f"**{spec.name}**  \nLicense: {spec.license}  \nSource: {spec.url}  \n{spec.provenance}  \n*Limits:* {spec.limitations}")
-st.sidebar.caption("Session-isolated: your data lives only in this browser session's memory and is discarded when it ends.")

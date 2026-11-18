@@ -78,6 +78,7 @@ class CopilotState:
     page: str = ""
     selected_cluster: int | None = None
     dataset_kind: str = "synthetic"
+    loop: dict | None = None  # {"decisions": [Decision], "outcomes": {id: [dict]}, "quality": {cluster_id: dict}}
 
 
 def _fmt(v: float | None) -> str:
@@ -355,7 +356,61 @@ def tool_reversal(st: CopilotState, q: str) -> Recommendation:
         sens[["driver", "min_v"]].to_dict("records"))
 
 
+def tool_outcome_review(st: CopilotState, q: str) -> Recommendation:
+    loop = st.loop or {}
+    measured = [(d, loop.get("outcomes", {}).get(d.id, [])) for d in loop.get("decisions", [])]
+    measured = [(d, o[0]) for d, o in measured if o]
+    if not measured:
+        return Recommendation(q, "No release, no verdict.", "Nothing has been released and measured yet. Approve a decision, create "
+                              "its ticket, record the release, then measure it in the Decision Loop.", [], "Outcomes need a release "
+                              "date and telemetry.", "n/a", "", "", "Pre/post adoption with a retention guardrail.", "Feature adoption",
+                              "PM", "Open Decision Loop -> step 4.", tool="outcome_review")
+    d, o = measured[0]
+    tbl = [{"decision": f"#{x.id} {x.cluster_label}", "verdict": y["verdict"], "adoption_pre": round(y["adoption_pre"], 3),
+            "adoption_post": round(y["adoption_post"], 3), "lift": round(y["lift"], 3), "data": y["data_label"]} for x, y in measured]
+    lo, hi = o["lift_ci90"]
+    return Recommendation(
+        q, {"worked": "It worked. Receipts attached.", "regressed": "That one backfired. Let's learn from it."}.get(o["verdict"],
+                                                                                                         "The jury's still out."),
+        o.get("forecast", {}).get("summary", f"Verdict: {o['verdict']}."),
+        [f"Adoption {o['adoption_pre']:.0%} -> {o['adoption_post']:.0%} over {o['accounts_post']} active accounts",
+         f"Retention {o['retention_prior']:.0%} -> {o['retention_post']:.0%} (guardrail {'ok' if o['guardrail_ok'] else 'BREACHED'})",
+         f"Data: {o['data_label']}"],
+        f"Decision #{d.id} was ranked #{d.metrics.get('rank')} with modeled net value ${d.metrics.get('net_value', 0):,.0f}.",
+        f"90% CI on lift {lo:+.1%} to {hi:+.1%}; observational pre/post, not causal.", "Seasonality and customer-mix shifts are not removed.",
+        "A rising market could explain the lift without the feature.", "Hold out 10-20% of accounts for the next release.",
+        "Feature adoption (28-day window)", d.owner, "Record the learning on the decision and recalibrate similar themes.",
+        calculations=[f"lift = {o['adoption_post']:.3f} - {o['adoption_pre']:.3f} = {o['lift']:+.3f}"], tool="outcome_review", table=tbl)
+
+
+def tool_ticket_preview(st: CopilotState, q: str) -> Recommendation:
+    r = st.ranked.iloc[0]
+    return Recommendation(q, "I'll draft it. You press the button.", f"Ticket preview for '{r.label}' is ready in the Decision Loop. I "
+                          "never create tickets myself: a human approves the decision first, then clicks 'Create ticket'.",
+                          [f"{int(r.unique_accounts)} accounts, {int(r.tickets)} records"], "State-changing actions are previewed, "
+                          "permission-checked and audited.", "n/a", "", "", "", "", "PM", "Decision Loop -> step 2 -> approve -> create ticket.",
+                          citations=_cites(st, int(r.cluster_id)), tool="ticket_preview")
+
+
+def tool_evidence_quality(st: CopilotState, q: str) -> Recommendation:
+    qual = (st.loop or {}).get("quality", {})
+    rows = []
+    for _, r in st.ranked.head(8).iterrows():
+        x = qual.get(int(r.cluster_id))
+        if x:
+            rows.append({"theme": r.label, "score": x["score"], "grade": x["grade"], "missing": "; ".join(x["missing"][:3]) or "-"})
+    weak = [x for x in rows if x["grade"] != "strong"]
+    return Recommendation(q, "Confidence is earned, not generated.", (f"{len(weak)} of the top {len(rows)} themes have gaps. Biggest gap: "
+                          f"'{weak[0]['theme']}' - {weak[0]['missing']}.") if weak else "Top themes pass every evidence check.",
+                          [f"{x['theme']}: {x['grade']} ({x['score']:.0%})" for x in rows[:5]], "Weak evidence is the main way roadmaps go wrong.",
+                          "Deterministic checklist (8 weighted checks).", "", "", "", "", "PM", "Close the listed gaps before approval.",
+                          tool="evidence_quality", table=rows)
+
+
 INTENTS: list[tuple[str, str]] = [
+    (r"\b(did (the|it|this) (release|launch|feature)|outcome|did it work|post[- ]release|impact materiali)", "outcome_review"),
+    (r"\b(ticket|jira|linear|engineering issue)\b", "ticket_preview"),
+    (r"\b(evidence quality|how solid|data gaps|missing evidence|contradict)", "evidence_quality"),
     (r"\b(debate|perspectives|all lenses|reconcile)\b", "debate"),
     (r"\bcfo\b", "persona:CFO"), (r"\bcto\b", "persona:CTO"), (r"\b(vp product|principal pm|product lead)\b", "persona:Principal PM"),
     (r"\b(customer success|\bcs\b)", "persona:Customer Success"), (r"\bskeptic", "persona:Skeptical Executive"),
@@ -405,7 +460,8 @@ def answer(st: CopilotState, q: str) -> Recommendation:
         return r
     fn = {"build_next": tool_build_next, "revenue_threats": tool_revenue_threats, "debate": tool_debate, "challenge": tool_challenge,
           "reversal": tool_reversal, "weak_evidence": tool_weak_evidence, "ignoring": tool_ignoring, "kill": tool_kill,
-          "highest_roi": tool_highest_roi}[intent]
+          "highest_roi": tool_highest_roi, "outcome_review": tool_outcome_review,
+          "ticket_preview": tool_ticket_preview, "evidence_quality": tool_evidence_quality}[intent]
     return fn(st, q)
 
 

@@ -141,16 +141,16 @@ def test_upload_malformed_empty_and_independent_session(base_url, browser, tmp_p
     page.get_by_role("option", name="Upload file").click()
     _wait(page, "No data, no drama")
     bad = tmp_path / "bad.csv"; bad.write_bytes(b"\x00\x01\x02garbage")
-    page.locator('input[type="file"]').set_input_files(str(bad))       # 22 malformed input
+    page.locator('input[type="file"][accept*=".csv"]').set_input_files(str(bad))       # 22 malformed input
     _wait(page, "isn't cooperating")
     empty = tmp_path / "empty.csv"; empty.write_text("feedback_text\n")
-    page.locator('input[type="file"]').set_input_files(str(empty))     # 23 empty dataset
+    page.locator('input[type="file"][accept*=".csv"]').set_input_files(str(empty))     # 23 empty dataset
     _wait(page, "isn't cooperating")
     good = tmp_path / "reviews.csv"
     good.write_text("review,rating\n" + "\n".join(
         [f"App crashes when I open the camera screen {i}" ,f"Sync with the server fails after update {i}", f"Please add an export to PDF option {i}"][i % 3] + f",{1 + i % 3}"
         for i in range(60)))
-    page.locator('input[type="file"]').set_input_files(str(good))      # 20-21 independent upload, core analysis repeats
+    page.locator('input[type="file"][accept*=".csv"]').set_input_files(str(good))      # 20-21 independent upload, core analysis repeats
     _wait(page, "NO REVENUE DATA")
     _wait(page, "Themes")
     other = browser.new_context().new_page()                          # 25 separate visitor session
@@ -158,3 +158,37 @@ def test_upload_malformed_empty_and_independent_session(base_url, browser, tmp_p
     _wait(other, "SYNTHETIC DEMO")
     assert other.get_by_text("NO REVENUE DATA").count() == 0
     other.context.close(); ctx.close()
+
+
+def test_closed_loop_decision_to_outcome(base_url, browser, tmp_path):
+    """Evidence -> proposed decision -> human approval -> ticket + PRD (PDF) -> release -> measured outcome."""
+    ctx = browser.new_context(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
+    page = ctx.new_page()
+    page.goto(base_url)
+    _wait(page, "Executive Dashboard")
+    _nav(page, "Decision Loop")
+    _wait(page, "Propose a decision from evidence")
+    _wait(page, "Evidence:")
+    page.get_by_label("Decision owner").fill("E2E PM"); page.keyboard.press("Enter")
+    page.get_by_label("Rationale (required)").fill("E2E: strongest evidence and value"); page.keyboard.press("Enter")
+    page.wait_for_timeout(800)
+    page.get_by_role("button", name="Propose decision").click()
+    _wait(page, "Human approval")
+    page.get_by_label("Approval / rejection note (required)").fill("E2E approved"); page.keyboard.press("Enter")
+    page.wait_for_timeout(800)
+    page.get_by_role("button", name="✅ Approve").click()
+    page.get_by_role("button", name="Create ticket").wait_for(timeout=60_000)
+    page.get_by_role("button", name="Create ticket").click()
+    _wait(page, "Ticket #")
+    with page.expect_download() as d:
+        page.get_by_role("button", name="PRD (.pdf)").click()
+    p = tmp_path / "prd.pdf"; d.value.save_as(p)
+    assert p.read_bytes()[:5] == b"%PDF-"
+    page.get_by_role("button", name="Record release").click()
+    _wait(page, "Released v1.0")
+    page.get_by_role("button", name="Measure outcome").click()
+    _wait(page, "Verdict:")
+    _wait(page, "Recommended at rank")
+    page.get_by_text("Verdict:").first.scroll_into_view_if_needed()
+    _shot(page, "08-decision-loop-outcome")
+    ctx.close()
