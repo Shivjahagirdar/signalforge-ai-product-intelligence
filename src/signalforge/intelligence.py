@@ -24,12 +24,17 @@ LABEL_BLOCKLIST = {"fuck", "fucking", "shit", "bullshit", "crap", "crappy", "dam
                    "garbage", "trash", "hell", "dumb", "worst", "gay", "retarded", "piece"}
 # Semantic backend: Model2Vec static embeddings (MIT, ~30 MB, numpy-only, no torch). Downloaded once from Hugging Face.
 SEMANTIC_MODEL = os.environ.get("SF_SEMANTIC_MODEL", "minishlab/potion-base-8M")
-SEMANTIC_WEIGHT = float(os.environ.get("SF_SEMANTIC_WEIGHT", "0.7"))  # share of cosine similarity from semantics (rest: LSA)
+SEMANTIC_WEIGHT = float(os.environ.get("SF_SEMANTIC_WEIGHT", "0.85"))  # CI grid search (docs/research): best held-out ARI  # share of cosine similarity from semantics (rest: LSA)
 _SEM_CACHE: dict = {}
 
 
+SEMANTIC_THRESHOLD = 0.8  # recommended cluster breadth when semantic matching is on (distance scale differs from lexical)
+
+
 def semantic_enabled() -> bool:
-    return os.environ.get("SF_SEMANTIC", "auto").lower() not in ("0", "off", "false")
+    """Opt-in. The lexical LSA backend is the deterministic, offline default (CI grid search showed no single setting
+    wins on every dataset: semantic matching helps paraphrases but loosens tightly-templated data)."""
+    return os.environ.get("SF_SEMANTIC", "0").lower() in ("1", "on", "true", "auto")
 
 
 def _semantic_model():
@@ -116,34 +121,8 @@ def _auto_k(n: int) -> int:
     return int(np.clip(round(np.sqrt(n / 2)), 6, 30))
 
 
-ADAPTIVE_GRID = tuple(np.round(np.arange(0.45, 0.96, 0.05), 2))
-ADAPTIVE_MAX_N = 3000  # the dendrogram is O(n^2) memory; larger inputs use the fixed threshold
-
-
-def adaptive_cut(x: np.ndarray) -> tuple[np.ndarray, float]:
-    """Unsupervised threshold choice: build the average-linkage cosine dendrogram once, cut it on a grid, keep the cut
-    with the best silhouette among partitions with 2..n/3 clusters. No labels are used."""
-    from scipy.cluster.hierarchy import fcluster, linkage
-    from sklearn.metrics import silhouette_score
-
-    n = len(x)
-    z = linkage(x, method="average", metric="cosine")
-    best, best_s, best_t = None, -2.0, float(ADAPTIVE_GRID[-1])
-    for t in ADAPTIVE_GRID:
-        lab = fcluster(z, t=float(t), criterion="distance") - 1
-        k = int(lab.max()) + 1
-        if k < 2 or k > max(n // 3, 2):
-            continue
-        sc = float(silhouette_score(x, lab, metric="cosine", sample_size=min(n, 1500), random_state=0))
-        if sc > best_s:
-            best, best_s, best_t = lab, sc, float(t)
-    if best is None:
-        best = fcluster(z, t=float(ADAPTIVE_GRID[-1]), criterion="distance") - 1
-    return best, best_t
-
-
 def cluster_feedback(df: pd.DataFrame, distance_threshold: float = 0.9, prefer_transformer: bool = False,
-                     method: str = "auto") -> pd.DataFrame:
+                     method: str = "auto", semantic: bool | None = None) -> pd.DataFrame:
     """Add cluster_id, cluster_label, cohesion, is_outlier columns. Deterministic.
 
     method='auto': average-linkage agglomerative first (best on templated/consistent feedback). If that produces an
@@ -151,16 +130,13 @@ def cluster_feedback(df: pd.DataFrame, distance_threshold: float = 0.9, prefer_t
     (>40% of records in clusters smaller than 3) - fall back to K-Means with k = clip(sqrt(n/2), 6, 30).
     The method actually used is recorded in out.attrs['method']."""
     out = df.copy().reset_index(drop=True)
-    x, terms, backend = embed(out["feedback_text"].tolist(), prefer_transformer)
+    x, terms, backend = embed(out["feedback_text"].tolist(), prefer_transformer, semantic=semantic)
     used = "single"
     if len(out) < 2:
         out["cluster_id"] = 0
     else:
         p = None
-        if method == "adaptive" and 3 <= len(out) <= ADAPTIVE_MAX_N:
-            p, t_used = adaptive_cut(x)
-            used = f"adaptive(t={t_used:.2f})"
-        elif method in ("auto", "agglomerative", "adaptive"):
+        if method in ("auto", "agglomerative"):
             p = AgglomerativeClustering(n_clusters=None, metric="cosine", linkage="average",
                                         distance_threshold=distance_threshold).fit_predict(x)
             used = "agglomerative"

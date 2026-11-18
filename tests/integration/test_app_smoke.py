@@ -94,9 +94,26 @@ def test_copilot_answers_from_state_on_every_page(at):
 def test_exports_present(at):
     goto(at, "Decision Memo & PRD")
     labels = [d.label for d in at.get("download_button")]
-    for name in ["Executive memo (.md)", "PRD (.md)", "PRD (.docx)", "Evidence appendix (.docx)", "Download full decision pack (.docx)"]:
+    for name in ["Executive memo (.md)", "PRD (.md)", "PRD (.docx)", "PRD (.pdf)", "Evidence appendix (.docx)",
+                 "Download full decision pack (.docx)", "Download full decision pack (.pdf)", "Save analysis (.json)"]:
         assert name in labels
 
 
 def test_session_store_is_in_memory_not_disk(at, tmp_path):
     assert not list(tmp_path.glob("*.db"))
+
+
+def test_semantic_toggle_falls_back_cleanly_offline(at):
+    at.sidebar.toggle(key="semantic").set_value(True).run()   # model download is unavailable/disabled in tests
+    assert not at.exception, at.exception
+    assert at.session_state["thr"] == 0.8                      # recommended breadth for semantic matching is applied
+    assert any("lexical backend" in w.value for w in at.sidebar.warning)
+    at.sidebar.toggle(key="semantic").set_value(False).run()
+    assert at.session_state["thr"] == 0.9 and not at.exception
+
+
+def test_next_step_button_navigates_and_metrics_panel_renders(at):
+    next(b for b in at.button if b.key == "next_0").click().run()
+    assert at.sidebar.radio(key="page").value == "Customer Intelligence"
+    goto(at, "Decision Memo & PRD")
+    assert any("Time to first insight" in m.label for m in at.metric)

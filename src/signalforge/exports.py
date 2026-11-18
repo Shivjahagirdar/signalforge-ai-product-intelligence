@@ -198,3 +198,44 @@ def markdown_to_docx(md: str) -> bytes:
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+def markdown_to_pdf(md: str, title: str = "SignalForge AI") -> bytes:
+    """Markdown -> PDF (fpdf2, core fonts). Headings, bullets, tables (as aligned rows) and paragraphs."""
+    import re
+
+    from fpdf import FPDF
+
+    def clean(t: str) -> str:
+        t = re.sub(r"\*\*|__|`", "", t).replace("→", "->").replace("—", "-").replace("–", "-")
+        t = t.replace("≤", "<=").replace("≥", ">=").replace("×", "x").replace("Σ", "Sum ")
+        return t.encode("latin-1", "replace").decode("latin-1")
+
+    pdf = FPDF(format="Letter")
+    pdf.set_auto_page_break(True, margin=15)
+    pdf.set_title(clean(title))
+    pdf.add_page()
+    width = pdf.w - pdf.l_margin - pdf.r_margin
+    for ln in md.splitlines():
+        ln = ln.rstrip()
+        if re.match(r"^\|?\s*-{3,}", ln.replace(":", "-").replace("|", "").strip() + "---") and set(ln) <= set("|-: "):
+            continue  # table separator
+        if m := re.match(r"^(#{1,4})\s+(.*)", ln):
+            pdf.set_font("Helvetica", "B", {1: 16, 2: 13, 3: 11, 4: 10}[len(m.group(1))])
+            pdf.multi_cell(width, 7, clean(m.group(2)), new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(1)
+        elif ln.startswith("|"):
+            pdf.set_font("Helvetica", "", 8)
+            cells = [clean(c.strip()) for c in ln.strip("|").split("|")]
+            pdf.multi_cell(width, 4.5, "  |  ".join(cells), new_x="LMARGIN", new_y="NEXT")
+        elif re.match(r"^\s*([-*]|\d+\.)\s+", ln):
+            pdf.set_font("Helvetica", "", 10)
+            pdf.multi_cell(width, 5, "  - " + clean(re.sub(r"^\s*([-*]|\d+\.)\s+", "", ln)), new_x="LMARGIN", new_y="NEXT")
+        elif ln.strip() == "---":
+            pdf.add_page()
+        elif ln.strip():
+            pdf.set_font("Helvetica", "", 10)
+            pdf.multi_cell(width, 5, clean(ln.strip("_")), new_x="LMARGIN", new_y="NEXT")
+        else:
+            pdf.ln(2)
+    return bytes(pdf.output())

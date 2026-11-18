@@ -50,6 +50,10 @@ class AuditStore:
         r = self.db.execute("SELECT body FROM overrides WHERE id=1").fetchone()
         return Overrides.from_json(r[0]) if r else Overrides()
 
+    def import_events(self, events: list[tuple]) -> None:
+        self.db.executemany("INSERT INTO audit(ts,kind,detail) VALUES(?,?,?)", [tuple(e[:3]) for e in reversed(events)])
+        self.db.commit()
+
     def reset(self) -> None:
         self.db.execute("DELETE FROM audit")
         self.db.execute("DELETE FROM overrides")

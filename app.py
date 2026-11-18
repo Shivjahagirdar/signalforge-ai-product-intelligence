@@ -1,11 +1,13 @@
 """SignalForge AI - Product Intelligence & Decision OS (Streamlit UI). Domain logic lives in src/signalforge."""
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
 
 from signalforge.audit import AuditStore, Overrides
@@ -21,26 +23,77 @@ from signalforge.exports import (
     generate_prd,
     generate_roadmap_md,
     markdown_to_docx,
+    markdown_to_pdf,
 )
 from signalforge.ingestion import MAX_BYTES, REQUIRED, IngestionError, safe_csv, validate
-from signalforge.intelligence import cluster_feedback, near_duplicates, suggest_merges
+from signalforge.intelligence import SEMANTIC_THRESHOLD, cluster_feedback, near_duplicates, suggest_merges
+from signalforge.metrics import session_metrics
 from signalforge.optimizer import Constraints, alternative, greedy_baseline, optimise
+from signalforge.persistence import restore as restore_snapshot
+from signalforge.persistence import snapshot
 from signalforge.pipeline import build_opportunities, explain_outranks, portfolio_total, rank_opportunities, scenario_ranks
 from signalforge.prioritization import FRAMEWORKS, Weights, compare_frameworks, score, weight_sensitivity
 from signalforge.synthetic import generate
 
 st.set_page_config(page_title="SignalForge AI", page_icon="◆", layout="wide")
+POP = ["#7c3aed", "#ec4899", "#f59e0b", "#14b8a6", "#3b82f6", "#22c55e", "#ef4444", "#8b5cf6"]
+pio.templates["sf"] = go.layout.Template(layout=dict(
+    colorway=POP, font=dict(family="Inter, -apple-system, Segoe UI, Roboto, sans-serif", color="#1e1b4b"),
+    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,.65)", title=dict(font=dict(size=16)),
+    xaxis=dict(gridcolor="#ede9fe", zerolinecolor="#ddd6fe"), yaxis=dict(gridcolor="#ede9fe", zerolinecolor="#ddd6fe"),
+    legend=dict(bgcolor="rgba(255,255,255,.6)"), margin=dict(l=10, r=10, t=48, b=10)))
+pio.templates.default = "plotly_white+sf"
 st.markdown("""<style>
-.block-container{padding-top:3.2rem;max-width:1360px}
-h1,h2,h3{letter-spacing:-.01em}
-[data-testid=stMetricValue]{font-size:1.45rem;font-weight:650}
-[data-testid=stMetricLabel]{color:#8a94a6}
-.sf-pill{display:inline-block;padding:.12rem .55rem;border-radius:999px;font-size:.74rem;font-weight:600;margin-right:.35rem}
-.sf-syn{background:#fff4d6;color:#7a5600}.sf-real{background:#ddf4e4;color:#165c2e}.sf-warn{background:#fde2e1;color:#8a1c1c}
-.sf-banner{border-left:4px solid #6c5ce7;background:rgba(108,92,231,.07);padding:.7rem 1rem;border-radius:8px;margin:.4rem 0 1rem}
-.sf-banner b{color:#6c5ce7}
+:root{--p:#7c3aed;--pk:#ec4899;--am:#f59e0b;--tl:#14b8a6;--bl:#3b82f6;--ink:#1e1b4b}
+.stApp{background:radial-gradient(1100px 480px at 8% -8%,#ede9fe 0%,transparent 60%),radial-gradient(900px 420px at 100% 0%,#fce7f3 0%,transparent 55%),#fbfaff}
+.block-container{padding-top:3.6rem;max-width:1360px}
+h1,h2,h3{letter-spacing:-.015em;color:var(--ink)}
+.stApp h1{font-weight:800;background:linear-gradient(90deg,#4c1d95,#be185d);-webkit-background-clip:text;background-clip:text;color:transparent;width:fit-content}
+[data-testid=stSidebar]{background:linear-gradient(180deg,#f3efff 0%,#fff0f7 100%);border-right:1px solid #ede9fe}
+.sf-hero{display:flex;align-items:center;gap:1rem;color:#fff;border-radius:22px;padding:1.1rem 1.5rem;margin:0 0 .9rem;
+ background:linear-gradient(120deg,#7c3aed 0%,#ec4899 58%,#f59e0b 100%);box-shadow:0 14px 34px -14px rgba(124,58,237,.6)}
+.sf-logo{font-size:2rem;line-height:1;background:rgba(255,255,255,.22);border-radius:16px;padding:.55rem .75rem}
+.sf-brand{font-size:1.45rem;font-weight:800;letter-spacing:-.02em}.sf-tag{opacity:.93;font-size:.95rem;margin-top:.1rem}
+.sf-steps{display:flex;flex-wrap:wrap;gap:.4rem;margin:.2rem 0 .9rem}
+.sf-step{padding:.28rem .8rem;border-radius:999px;font-size:.8rem;font-weight:600;background:#fff;color:#6b7280;border:1px solid #e9e5ff}
+.sf-step.done{background:#ede9fe;color:#5b21b6;border-color:#ddd6fe}
+.sf-step.on{background:linear-gradient(135deg,#7c3aed,#ec4899);color:#fff;border-color:transparent;box-shadow:0 6px 14px -6px rgba(124,58,237,.7)}
+.sf-blurb{color:#5b5b8a;font-size:1.02rem;margin:-.4rem 0 .9rem}
+[data-testid=stMetric]{background:#fff;border-radius:18px;padding:.85rem 1rem;border-top:5px solid var(--p);
+ box-shadow:0 10px 24px -14px rgba(76,29,149,.45);transition:transform .15s ease,box-shadow .15s ease}
+[data-testid=stMetric]:hover{transform:translateY(-3px);box-shadow:0 16px 28px -14px rgba(76,29,149,.55)}
+[data-testid=stColumn]:nth-child(6n+2) [data-testid=stMetric]{border-top-color:var(--pk)}
+[data-testid=stColumn]:nth-child(6n+3) [data-testid=stMetric]{border-top-color:var(--am)}
+[data-testid=stColumn]:nth-child(6n+4) [data-testid=stMetric]{border-top-color:var(--tl)}
+[data-testid=stColumn]:nth-child(6n+5) [data-testid=stMetric]{border-top-color:var(--bl)}
+[data-testid=stColumn]:nth-child(6n+6) [data-testid=stMetric]{border-top-color:#22c55e}
+[data-testid=stMetricValue]{font-size:1.5rem;font-weight:800;color:var(--ink)}
+[data-testid=stMetricLabel]{color:#6b6b99;font-weight:600}
+.stButton button,.stDownloadButton button{border-radius:999px;border:0;font-weight:650;color:#fff;
+ background:linear-gradient(135deg,#7c3aed,#ec4899);box-shadow:0 8px 16px -8px rgba(124,58,237,.7);transition:transform .12s ease,filter .12s ease}
+.stButton button p,.stDownloadButton button p{color:#fff}
+.stButton button:hover,.stDownloadButton button:hover{transform:translateY(-2px);filter:brightness(1.07);color:#fff}
+[class*="st-key-q_"] button{background:#fff;color:#5b21b6;border:1px solid #ddd6fe;box-shadow:none;font-weight:600}
+[class*="st-key-q_"] button p{color:#5b21b6}
+[class*="st-key-next_"] button{background:linear-gradient(135deg,#14b8a6,#3b82f6)}
+[data-testid=stExpander]{background:#fff;border-radius:16px;border:1px solid #ede9fe;box-shadow:0 8px 20px -16px rgba(76,29,149,.5)}
+[data-testid=stVerticalBlockBorderWrapper]:has(> div > [data-testid=stVerticalBlock] .sf-card){border-radius:18px}
+div[data-testid=stVerticalBlockBorderWrapper]{border-radius:18px}
+[data-testid=stChatMessage]{border-radius:16px;background:#fff;border:1px solid #f1ecff}
+[data-testid=stSidebar] [data-testid=stRadio] label{background:#fff;border:1px solid #e9e5ff;border-radius:12px;padding:.35rem .7rem;margin-bottom:.25rem;width:100%}
+[data-testid=stSidebar] [data-testid=stRadio] label:has(input:checked){background:linear-gradient(135deg,#7c3aed,#ec4899);border-color:transparent}
+[data-testid=stSidebar] [data-testid=stRadio] label:has(input:checked) p{color:#fff;font-weight:700}
+[data-testid=stSidebar] [data-testid=stRadio] label>div:first-child{display:none}
+.sf-pill{display:inline-block;padding:.18rem .7rem;border-radius:999px;font-size:.74rem;font-weight:700;margin-right:.35rem}
+.sf-syn{background:#fff4d6;color:#7a5600}.sf-real{background:#d9f7e5;color:#116b34}.sf-warn{background:#fde2e1;color:#8a1c1c}
+.sf-banner{border:1px solid #ddd6fe;border-left:6px solid var(--p);background:linear-gradient(90deg,#f5f3ff,#fff);padding:.8rem 1.1rem;border-radius:14px;margin:.4rem 0 1rem;
+ box-shadow:0 10px 22px -18px rgba(76,29,149,.6)}
+.sf-banner b{color:var(--p)}
 .sf-muted{color:#8a94a6;font-size:.85rem}
 </style>""", unsafe_allow_html=True)
+st.markdown('<div class="sf-hero"><div class="sf-logo">◆</div><div><div class="sf-brand">SignalForge AI</div>'
+            '<div class="sf-tag">Your customers are telling you what to build. SignalForge tells you what deserves the budget.</div></div></div>',
+            unsafe_allow_html=True)
 fmt = lambda v: "n/a" if v is None or pd.isna(v) else f"${v:,.0f}"  # noqa: E731
 
 
@@ -58,12 +111,13 @@ if "store" not in ss:
     ss.store = AuditStore(":memory:")
     ss.chat = []
     ss.onboarded = False
+    ss.t0 = time.time()
 store: AuditStore = ss.store
 
 
-@st.cache_data(show_spinner="Clustering feedback (semantic, deterministic)...", max_entries=8)
-def run_clustering(df: pd.DataFrame, thr: float) -> pd.DataFrame:
-    return cluster_feedback(df, thr)
+@st.cache_data(show_spinner="Finding themes in your feedback...", max_entries=8)
+def run_clustering(df: pd.DataFrame, thr: float, semantic: bool) -> pd.DataFrame:
+    return cluster_feedback(df, thr, semantic=semantic)
 
 
 @st.cache_data(show_spinner="Fetching public dataset from its original host...", ttl=3600, max_entries=6)
@@ -71,14 +125,40 @@ def fetch_public(key: str, repo: str | None) -> pd.DataFrame:
     return load_public(key, repo)  # cached per (dataset, repo): public data only, never user uploads
 
 
+def _go(target: str) -> None:
+    ss.page = target
+
+
+def _on_semantic() -> None:
+    ss.thr = SEMANTIC_THRESHOLD if ss.get("semantic") else 0.9  # distance scale differs between backends
+
+
+def _on_restore() -> None:
+    f = ss.get("restore_file")
+    if f is None:
+        return
+    try:
+        snap = restore_snapshot(f.getvalue())
+    except ValueError as e:
+        ss.restore_error = str(e)
+        return
+    for k, v in snap["widgets"].items():  # set widget state BEFORE widgets are created on the rerun
+        ss[k] = v
+    ss.pending_restore = snap
+
+
 # ---------------- sidebar: data ----------------
-st.sidebar.markdown("### ◆ SignalForge AI")
-st.sidebar.caption("Your customers are telling you what to build. SignalForge tells you what deserves the budget.")
+PAGES = ["Executive Dashboard", "Customer Intelligence", "Opportunity Economics", "Roadmap Optimizer", "Scenario Lab", "Decision Memo & PRD"]
+ICON = dict(zip(PAGES, ["📊", "🧠", "💰", "🗺️", "🧪", "📝"]))
+st.sidebar.markdown("##### Where to?")
+page = st.sidebar.radio("Navigate", PAGES, key="page", format_func=lambda n: f"{ICON[n]}  {n}", label_visibility="collapsed")
+st.sidebar.markdown("---")
+st.sidebar.markdown("##### 1 · Pick your data")
 SOURCES = {"Synthetic demo (1,000 records)": "synthetic", "Public: F-Droid app reviews": "fdroid_reviews",
            "Public: Bitext support requests": "bitext_support", "Public: GitHub issues (live)": "github_issues", "Upload file": "upload"}
 src_label = st.sidebar.selectbox("Dataset", list(SOURCES), key="dataset")
 src = SOURCES[src_label]
-st.sidebar.download_button("Download CSV template", ",".join(REQUIRED) + "\n", "signalforge_template.csv", "text/csv")
+st.sidebar.download_button("⬇ CSV template", ",".join(REQUIRED) + "\n", "signalforge_template.csv", "text/csv")
 
 ingest, notes = None, []
 try:
@@ -126,8 +206,12 @@ is_synth = src == "synthetic"
 has_acv = ingest.df["annual_contract_value"].notna().any()
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("##### 2 · Tune the analysis")
+semantic = st.sidebar.toggle("Semantic matching (beta)", False, key="semantic", on_change=_on_semantic,
+                             help="Groups paraphrases better (held-out ARI 0.30 → 0.76 in CI) but loosens tightly-templated data "
+                                  "(synthetic ARI 0.999 → 0.37 at the same settings). Downloads a ~30 MB open model once.")
 thr = st.sidebar.slider("Cluster breadth", 0.5, 0.98, 0.9, 0.01, help="Cosine distance threshold. Higher = fewer, broader themes.", key="thr")
-with st.sidebar.expander("Financial assumptions", expanded=not has_acv):
+with st.sidebar.expander("💵 Financial assumptions", expanded=not has_acv):
     if not has_acv:
         st.caption("This dataset has **no revenue**. Values below are labelled user assumptions, not facts.")
     a = Assumptions(
@@ -140,13 +224,25 @@ with st.sidebar.expander("Financial assumptions", expanded=not has_acv):
         assumed_acv_per_account=(st.number_input("ASSUMED value per affected account (USD/yr)", 0.0, 1e6, 500.0, 50.0, key="assumed")
                                  if not has_acv else None),
     ).validated()
-if st.sidebar.button("Reset my session (data, overrides, audit)", key="reset"):
+with st.sidebar.expander("Save / load analysis"):
+    st.caption("No server-side storage: download a snapshot (settings, assumptions, overrides, constraints, audit) and "
+               "load it later to continue. Raw data is never included.")
+    _snap_widgets = {k: ss.get(k) for k in ("dataset", "thr", "exp", "rec", "eng", "infra", "sup", "impute", "assumed", "semantic")}
+    _cons = {"cap": ss.get("cap"), "minconf": ss.get("minconf", 0.0), "budget": ss.get("budget"),
+             "mandatory": [int(x) for x in ss.get("mandatory", [])], "deps": [list(map(int, d)) for d in ss.get("deps", [])]}
+    st.download_button("Save analysis (.json)", snapshot(_snap_widgets, store.load_overrides(), _cons, store.events(),
+                                                       [str(x) if not isinstance(x, (int, float)) else x for x in ss.get("sig", ())]),
+                       "signalforge_analysis.json", "application/json", key="save_analysis")
+    st.file_uploader("Load saved analysis", type=["json"], key="restore_file", on_change=_on_restore)
+if st.sidebar.button("↺ Reset my session", key="reset", help="Clears data, overrides and the audit trail for this session."):
     store.reset(); ss.chat = []
     st.rerun()
 
 # ---------------- analysis ----------------
-clustered = run_clustering(ingest.df, thr)
-sig = (src, len(ingest.df), thr, str(ingest.df["ticket_id"].iloc[0]))
+clustered = run_clustering(ingest.df, thr, bool(semantic))
+if semantic and "model2vec" not in str(clustered.attrs.get("backend")):
+    st.sidebar.warning("Semantic model unavailable on this host; using the lexical backend.")
+sig = (src, len(ingest.df), thr, bool(semantic), str(ingest.df["ticket_id"].iloc[0]))
 if ss.get("sig") != sig:  # cluster ids change with data/threshold: stale overrides must not silently carry over
     if ss.get("sig") is not None:
         store.save_overrides(Overrides()); store.log("overrides_cleared", "Data source or threshold changed")
@@ -154,6 +250,21 @@ if ss.get("sig") != sig:  # cluster ids change with data/threshold: stale overri
             ss.pop(k, None)
         ss.chat = []  # SIGNAL answers were about the previous dataset
     ss["sig"] = sig
+if ss.get("pending_restore"):
+    snap = ss.pop("pending_restore")
+    store.save_overrides(snap["overrides"])
+    store.import_events(snap["audit"])
+    c = snap["constraints"]
+    for k in ("cap", "minconf", "budget", "mandatory", "deps"):
+        if c.get(k) is not None:
+            ss[k] = c[k]
+    store.log("analysis_restored", f"saved analysis loaded ({len(snap['audit'])} audit events)")
+    if snap.get("data_signature") and list(snap["data_signature"]) != [str(x) if not isinstance(x, (int, float)) else x for x in sig]:
+        st.warning("Saved analysis was made on different data; theme overrides may not line up. Review them before relying on them.")
+    else:
+        st.toast("Saved analysis restored. Overrides, constraints and audit trail are back.")
+if ss.get("restore_error"):
+    st.error(f"That file isn't cooperating. {ss.pop('restore_error')}")
 ov: Overrides = store.load_overrides()
 opps = build_opportunities(clustered, a, ov)
 ranked = rank_opportunities(opps, a, ov)
@@ -164,14 +275,32 @@ if ranked.empty:
                "Try a broader cluster setting or more data.")
     st.stop()
 
+if "t_first" not in ss:
+    ss.t_first = time.time() - ss.t0  # server-side: session start -> first fully computed analysis
 pill = ('<span class="sf-pill sf-syn">SYNTHETIC DEMO - fictional accounts & revenue</span>' if is_synth else
         f'<span class="sf-pill sf-real">REAL PUBLIC DATA - {spec.name}</span>' if spec else '<span class="sf-pill sf-real">YOUR UPLOAD</span>')
 if not has_acv:
     pill += '<span class="sf-pill sf-warn">NO REVENUE DATA - $ values use your assumption</span>'
 st.markdown(pill, unsafe_allow_html=True)
 
-PAGES = ["Executive Dashboard", "Customer Intelligence", "Opportunity Economics", "Roadmap Optimizer", "Scenario Lab", "Decision Memo & PRD"]
-page = st.sidebar.radio("Navigate", PAGES, key="page")
+STEPS = ["Pick data", "Review themes", "Check the money", "Plan the roadmap", "Stress-test", "Share the decision"]
+BLURB = {
+    "Executive Dashboard": "The 30-second answer: what matters most right now, and why.",
+    "Customer Intelligence": "What customers are actually saying, grouped into themes you can inspect, fix and trust.",
+    "Opportunity Economics": "What each theme could be worth, what it costs, and exactly how every number is calculated.",
+    "Roadmap Optimizer": "Set your capacity and constraints; get the best-value plan and see what you are giving up.",
+    "Scenario Lab": "Change the assumptions and watch the decision hold up (or fall apart).",
+    "Decision Memo & PRD": "Everything you need to take this to the room: memo, PRD, evidence, audit trail.",
+}
+cur = PAGES.index(page)
+st.markdown('<div class="sf-steps">' + "".join(
+    f'<span class="sf-step {"on" if i == cur else "done" if i < cur else ""}">{ICON[PAGES[i]]} {i + 1}. {STEPS[i]}</span>'
+    for i in range(len(PAGES))) + "</div>", unsafe_allow_html=True)
+
+
+def next_step() -> None:
+    if cur < len(PAGES) - 1:
+        st.button(f"Next: {PAGES[cur + 1]} →", on_click=_go, args=(PAGES[cur + 1],), key=f"next_{cur}")
 
 # ---------------- roadmap constraints (shared by optimizer, copilot, memo) ----------------
 cap_default = float(round(ranked["effort_weeks"].sum() * 0.6, 1)) or 10.0
@@ -184,7 +313,7 @@ plan = optimise(ranked, cons)
 # ---------------- SIGNAL copilot (global, page-aware, session-scoped) ----------------
 def signal_panel(selected: int | None = None) -> None:
     with st.expander("◆ SIGNAL - your AI product strategist", expanded=bool(ss.chat)):
-        st.caption("Grounded in this session's data and calculations. " +
+        st.caption("Ask anything about this analysis. Answers are grounded in this session's data and calculations. " +
                    ("LLM narration on (server-side key)." if llm_available() else "Deterministic analytics (no LLM key needed)."))
         quick = ["What should we build next?", "Which three issues threaten the most revenue?", "Why is this cluster ranked first?",
                  "What happens if engineering capacity drops 30%?", "What would a CFO prioritize?", "Which recommendations have weak evidence?",
@@ -204,10 +333,12 @@ def signal_panel(selected: int | None = None) -> None:
             ss.chat.insert(0, (clicked, text or rec.to_markdown(), rec.table))
             store.log("copilot", f"[{rec.tool}] {clicked[:120]}")
         for qq, md, table in ss.chat[:3]:
-            st.markdown(f"> **You:** {qq}")
-            st.markdown(md)
-            if table:
-                st.dataframe(pd.DataFrame(table), width="stretch", hide_index=True)
+            with st.chat_message("user"):
+                st.markdown(qq)
+            with st.chat_message("assistant", avatar="✨"):
+                st.markdown(md)
+                if table:
+                    st.dataframe(pd.DataFrame(table), width="stretch", hide_index=True)
 
 
 def insight_banner() -> str:
@@ -229,6 +360,7 @@ def insight_banner() -> str:
 # ================= PAGE 1 =================
 if page == "Executive Dashboard":
     st.title("Executive Dashboard")
+    st.markdown(f'<div class="sf-blurb">{BLURB["Executive Dashboard"]}</div>', unsafe_allow_html=True)
     signal_panel()
     if not ss.onboarded:
         with st.container(border=True):
@@ -254,7 +386,8 @@ if page == "Executive Dashboard":
         for r in ranked.head(3).itertuples():
             with st.container(border=True):
                 badge = {"sufficient": "🟢", "directional": "🟡", "insufficient": "🔴"}[r.evidence_sufficiency]
-                st.markdown(f"**#{r.final_rank} · {r.label}** · {r.product_area} · {badge} evidence {r.evidence_sufficiency}")
+                medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(int(r.final_rank), "🔹")
+                st.markdown(f"{medal} **#{r.final_rank} · {r.label}** · {r.product_area} · {badge} evidence {r.evidence_sufficiency}")
                 st.write(f"{r.unique_accounts} accounts · exposure {fmt(r.potential_revenue_exposure)} · net {fmt(r.net_opportunity_value)} · "
                          f"{r.effort_weeks:.1f} pw · confidence {r.confidence:.2f} · trend {r.trend_status}")
         if len(ranked) > 1:
@@ -263,17 +396,20 @@ if page == "Executive Dashboard":
         st.subheader("Top product risks")
         risk = ranked.sort_values("potential_revenue_exposure", ascending=False).head(6)
         st.plotly_chart(px.bar(risk, x="potential_revenue_exposure", y="label", orientation="h", color="avg_severity",
-                               color_continuous_scale="OrRd", labels={"potential_revenue_exposure": "Exposure (USD)", "label": ""})
+                               color_continuous_scale="Sunsetdark", labels={"potential_revenue_exposure": "Exposure (USD)", "label": ""})
                         .update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0), yaxis={"autorange": "reversed"}),
-                        width="stretch")
+                        width="stretch", theme=None)
         em = ranked[ranked.trend_status.isin(["emerging", "rising"])]
         st.subheader("Emerging issues")
         st.write(", ".join(f"{x.label} ({x.trend_status})" for x in em.itertuples()) or "None detected (or not enough dated records).")
     st.caption("Every KPI's calculation is in Opportunity Economics; every theme's evidence is in Customer Intelligence.")
 
+    next_step()
+
 # ================= PAGE 2 =================
 elif page == "Customer Intelligence":
     st.title("Customer Intelligence")
+    st.markdown(f'<div class="sf-blurb">{BLURB["Customer Intelligence"]}</div>', unsafe_allow_html=True)
     signal_panel(ss.get("theme"))
     st.caption(f"Embedding backend: {clustered.attrs.get('backend', 'tfidf')} · {clustered.cluster_id.nunique()} raw clusters · "
                f"{int(clustered.is_outlier.sum())} outlier records")
@@ -290,12 +426,12 @@ elif page == "Customer Intelligence":
                  width="stretch", height=240, hide_index=True)
     st.download_button("Download processed CSV (formula-safe)", safe_csv(clustered), "signalforge_processed.csv", "text/csv")
     c1, c2 = st.columns(2)
-    c1.plotly_chart(px.histogram(clustered, x="severity", color="customer_segment", title="Severity by segment"), width="stretch")
+    c1.plotly_chart(px.histogram(clustered, x="severity", color="customer_segment", title="Severity by segment"), width="stretch", theme=None)
     sig_rows = [(o["label"], k, v) for o in opps if o["actionable"] for k, v in o["signal_profile"].items()]
     if sig_rows:
         c2.plotly_chart(px.density_heatmap(pd.DataFrame(sig_rows, columns=["theme", "signal", "share"]), x="signal", y="theme", z="share",
-                                           histfunc="sum", title="Signal profile by theme", color_continuous_scale="Purples"),
-                        width="stretch")
+                                           histfunc="sum", title="Signal profile by theme", color_continuous_scale="Sunsetdark"),
+                        width="stretch", theme=None)
 
     st.subheader("Theme explorer: why these records were grouped")
     cid = st.selectbox("Theme", ranked.cluster_id, format_func=lambda i: f"#{int(ranked.set_index('cluster_id').final_rank[i])} {by_id[i]['label']}", key="theme")
@@ -352,9 +488,12 @@ elif page == "Customer Intelligence":
     if non:
         st.caption("Non-actionable chatter (kept as evidence, not ranked): " + "; ".join(f"{x['label']} ({x['tickets']})" for x in non))
 
+    next_step()
+
 # ================= PAGE 3 =================
 elif page == "Opportunity Economics":
     st.title("Opportunity Economics")
+    st.markdown(f'<div class="sf-blurb">{BLURB["Opportunity Economics"]}</div>', unsafe_allow_html=True)
     signal_panel(ss.get("econ_pick"))
     st.markdown("**Observed facts** (records, accounts, observed ACV) · **User assumptions** (sidebar) · **Model estimates** "
                 "(exposure, value, ROI) · **Unknown** (churn, renewal outcomes - never modeled as fact).")
@@ -371,11 +510,11 @@ elif page == "Opportunity Economics":
                 "payback (mo) = investment / (recoverable / 12);  cost of delay = recoverable / 12 per month")
     sel = ranked.head(10)
     c1, c2 = st.columns(2)
-    c1.plotly_chart(go.Figure([go.Bar(name="Recoverable value", x=sel.label, y=sel.expected_recoverable_value, marker_color="#6c5ce7"),
-                               go.Bar(name="Total investment", x=sel.label, y=sel.total_investment, marker_color="#b2bec3")])
-                    .update_layout(barmode="group", title="Value vs investment (USD)"), width="stretch")
+    c1.plotly_chart(go.Figure([go.Bar(name="Recoverable value", x=sel.label, y=sel.expected_recoverable_value, marker_color="#7c3aed"),
+                               go.Bar(name="Total investment", x=sel.label, y=sel.total_investment, marker_color="#fbbf24")])
+                    .update_layout(barmode="group", title="Value vs investment (USD)"), width="stretch", theme=None)
     c2.plotly_chart(px.scatter(ranked, x="effort_weeks", y="net_opportunity_value", size="unique_accounts", color="evidence_sufficiency",
-                               hover_name="label", title="Effort vs value (size = accounts)"), width="stretch")
+                               hover_name="label", title="Effort vs value (size = accounts)"), width="stretch", theme=None)
     st.subheader("Scenario comparison (bear / base / bull)")
     st.dataframe(scenario_ranks([o for o in opps if o["actionable"] and not o["rejected"]], a), width="stretch")
     st.subheader("Confidence range for a theme")
@@ -384,9 +523,12 @@ elif page == "Opportunity Economics":
     st.write(f"Model-implied net value: P10 {fmt(mc['p10'])} · P50 {fmt(mc['p50'])} · P90 {fmt(mc['p90'])} · P(net>0) {mc['prob_positive']:.0%} "
              "(conditional on assumed ranges; not an empirical probability).")
 
+    next_step()
+
 # ================= PAGE 4 =================
 elif page == "Roadmap Optimizer":
     st.title("Roadmap Optimizer")
+    st.markdown(f'<div class="sf-blurb">{BLURB["Roadmap Optimizer"]}</div>', unsafe_allow_html=True)
     signal_panel()
     fw = st.selectbox("Prioritisation framework", list(FRAMEWORKS), key="fw")
     st.caption(f"Formula: {FRAMEWORKS[fw]}")
@@ -460,9 +602,12 @@ elif page == "Roadmap Optimizer":
     if o2.button("Remove override for this theme", key="b_unov") and oc in ov.rank:
         ov.rank.pop(oc); store.save_overrides(ov); store.log("rank_override_removed", by_id[oc]["label"]); st.rerun()
 
+    next_step()
+
 # ================= PAGE 5 =================
 elif page == "Scenario Lab":
     st.title("Scenario Lab")
+    st.markdown(f'<div class="sf-blurb">{BLURB["Scenario Lab"]}</div>', unsafe_allow_html=True)
     signal_panel()
     st.caption("Simulations show what the model implies under assumed ranges. They do not add precision the data doesn't have.")
     s1, s2, s3 = st.columns(3)
@@ -484,9 +629,9 @@ elif page == "Scenario Lab":
     top = r2.iloc[0]
     st.subheader(f"Sensitivity for #1: {top.label}")
     tn = tornado(by_id[int(top.cluster_id)], a2)
-    st.plotly_chart(go.Figure([go.Bar(y=tn.driver, x=tn.delta_low, orientation="h", name="-30%", marker_color="#e17055"),
-                               go.Bar(y=tn.driver, x=tn.delta_high, orientation="h", name="+30%", marker_color="#00b894")])
-                    .update_layout(barmode="relative", title="Tornado: change in net value (USD)"), width="stretch")
+    st.plotly_chart(go.Figure([go.Bar(y=tn.driver, x=tn.delta_low, orientation="h", name="-30%", marker_color="#ec4899"),
+                               go.Bar(y=tn.driver, x=tn.delta_high, orientation="h", name="+30%", marker_color="#14b8a6")])
+                    .update_layout(barmode="relative", title="Tornado: change in net value (USD)"), width="stretch", theme=None)
     import numpy as np
 
     mc = monte_carlo(by_id[int(top.cluster_id)], a2, seed=int(seed))
@@ -500,11 +645,14 @@ elif page == "Scenario Lab":
     sims = (by_id[int(top.cluster_id)]["acv_sum_unique"] * top.exposure_fraction * rng.triangular(0.5 * p, p, min(1.0, 1.5 * p) or 1e-9, 3000)
             - top.total_investment * rng.triangular(0.8, 1.0, 1.6, 3000))
     st.plotly_chart(px.histogram(x=sims, nbins=60, title="Uncertainty: simulated net value (USD)", labels={"x": "net value"})
-                    .add_vline(x=thr_val, line_dash="dash"), width="stretch")
+                    .add_vline(x=thr_val, line_dash="dash"), width="stretch", theme=None)
+
+    next_step()
 
 # ================= PAGE 6 =================
 else:
     st.title("Executive Decision Memo")
+    st.markdown(f'<div class="sf-blurb">{BLURB["Decision Memo & PRD"]}</div>', unsafe_allow_html=True)
     signal_panel()
     memo = generate_memo(ranked, a, portfolio_total([o for o in opps if o["actionable"]], a))
     if not is_synth:
@@ -523,19 +671,32 @@ else:
     for i, (name, md) in enumerate(docs.items()):
         with st.expander(name, expanded=False):
             st.markdown(md)
-        c1, c2, _ = st.columns([1, 1, 4])
+        c1, c2, c3, _ = st.columns([1, 1, 1, 3])
         fname = name.lower().replace(" ", "_")
         if c1.download_button(f"{name} (.md)", md, f"{fname}.md", key=f"dlmd_{i}"):
             store.log("export", f"{name} .md")
         c2.download_button(f"{name} (.docx)", markdown_to_docx(md), f"{fname}.docx",
                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dldocx_{i}")
+        c3.download_button(f"{name} (.pdf)", markdown_to_pdf(md, name), f"{fname}.pdf", "application/pdf", key=f"dlpdf_{i}")
     full = "\n\n---\n\n".join(docs.values())
-    st.download_button("Download full decision pack (.docx)", markdown_to_docx(full), "signalforge_decision_pack.docx", key="dl_pack")
+    p1, p2, _ = st.columns([1, 1, 2])
+    p1.download_button("Download full decision pack (.docx)", markdown_to_docx(full), "signalforge_decision_pack.docx", key="dl_pack")
+    p2.download_button("Download full decision pack (.pdf)", markdown_to_pdf(full, "SignalForge decision pack"),
+                       "signalforge_decision_pack.pdf", "application/pdf", key="dl_pack_pdf")
     st.success("Decision-ready. Evidence included.")
     st.subheader("Decision audit trail")
     ev = pd.DataFrame(store.events(), columns=["timestamp (UTC)", "event", "detail"])
     st.dataframe(ev, width="stretch", hide_index=True, key="audit_table")
     st.download_button("Export audit trail (.csv)", safe_csv(ev), "audit_trail.csv", "text/csv", key="dl_audit")
+    with st.expander("Product metrics for this session (instrumentation, not outcomes)"):
+        pm = session_metrics(store.events(), len(ranked), ss.get("t_first"))
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Time to first insight", f"{pm['seconds_to_first_insight']:.1f}s" if pm["seconds_to_first_insight"] is not None else "n/a",
+                  help="Server-side: session start to first computed analysis.")
+        m2.metric("Human corrections", pm["corrections"], help="Renames, merges, rejects, splits, exclusions and rank overrides.")
+        m3.metric("Correction rate", f"{pm['correction_rate']:.0%}" if pm["correction_rate"] is not None else "n/a", help="Corrections per theme shown.")
+        m4.metric("SIGNAL questions", pm["signal_questions"])
+        st.caption("Computed from this session's audit trail only; never stored or shared. Reviewer agreement with the model needs real reviewers and is not claimed.")
 
 st.sidebar.markdown("---")
 if spec:

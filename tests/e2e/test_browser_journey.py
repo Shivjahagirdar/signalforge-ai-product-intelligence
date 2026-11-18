@@ -52,7 +52,7 @@ def _wait(page, text, timeout=120_000, state="visible"):
 
 
 def _nav(page, name):
-    page.locator('[data-testid="stSidebar"]').get_by_text(name, exact=True).click()
+    page.locator('[data-testid="stSidebar"] [data-testid="stRadio"]').get_by_text(name, exact=False).first.click()
     page.get_by_role("heading", name=name if name != "Decision Memo & PRD" else "Executive Decision Memo").wait_for(timeout=120_000)
     page.wait_for_timeout(800)
 
@@ -96,7 +96,8 @@ def test_full_decision_journey(base_url, browser, tmp_path):
     page.get_by_text("Counterargument").first.scroll_into_view_if_needed()
     _shot(page, "06-signal-copilot")
     _nav(page, "Decision Memo & PRD")                                   # 16-19 generate + download PRD & memo
-    for label, fname in [("PRD (.md)", "prd.md"), ("Executive memo (.docx)", "executive_memo.docx")]:
+    for label, fname in [("PRD (.md)", "prd.md"), ("Executive memo (.docx)", "executive_memo.docx"),
+                         ("Download full decision pack (.pdf)", "pack.pdf")]:
         with page.expect_download() as d:
             page.get_by_role("button", name=label).click()
         path = tmp_path / fname
@@ -104,8 +105,26 @@ def test_full_decision_journey(base_url, browser, tmp_path):
         assert path.stat().st_size > 500
     assert "# PRD:" in (tmp_path / "prd.md").read_text()
     _shot(page, "07-decision-memo")
+    assert (tmp_path / "pack.pdf").read_bytes()[:4] == b"%PDF"
     _nav(page, "Roadmap Optimizer")                                     # 24 state persists across navigation
     _wait(page, "E2E: committed to strategic account", state="attached")  # dataframe cells are canvas-backed
+    sb = page.locator('[data-testid="stSidebar"]')                      # saved analysis: save in this session...
+    sb.get_by_text("Save / load analysis").click()
+    with page.expect_download() as d:
+        sb.get_by_role("button", name="Save analysis (.json)").click()
+    snap = tmp_path / "analysis.json"
+    d.value.save_as(snap)
+    assert "E2E: committed to strategic account" in snap.read_text()
+    fresh = browser.new_context(viewport={"width": 1440, "height": 900}).new_page()   # ...restore in a brand-new session
+    fresh.goto(base_url)
+    _wait(fresh, "Executive Dashboard")
+    fsb = fresh.locator('[data-testid="stSidebar"]')
+    fsb.get_by_text("Save / load analysis").click()
+    fsb.locator('input[type="file"]').set_input_files(str(snap))
+    fresh.wait_for_timeout(4000)
+    _nav(fresh, "Roadmap Optimizer")
+    _wait(fresh, "E2E: committed to strategic account", state="attached")
+    fresh.context.close()
     ctx.close()
 
 
