@@ -26,13 +26,14 @@ A guided 6-step tracker and a **Next step →** button on every page, plain-lang
 chat-style SIGNAL, one-click **Save analysis / Load saved analysis** (client-held JSON: no accounts, no server storage) and
 an opt-in **Semantic matching (beta)** toggle for paraphrase-heavy feedback.
 
-## The six pages (+ SIGNAL on every page)
+## The seven pages (+ SIGNAL on every page)
 | Page | Highlights |
 |---|---|
 | Executive Dashboard | evidence-backed SIGNAL banner, KPIs with calculation tooltips, top actions, risks, emerging issues, data quality |
 | Customer Intelligence | filters, theme explorer ("why grouped"), evidence & affected accounts, merge / split / reject / rename / undo, merge suggestions, duplicates |
 | Opportunity Economics | fact/assumption/estimate/unknown separation, formulas, value vs investment, bear/base/bull, P10–P90 |
 | Roadmap Optimizer | framework selector + custom weights + segment importance, framework comparison, sensitivity, capacity/budget/confidence/mandatory/dependencies, optimal vs greedy vs alternative plan, overrides, exports |
+| Decision Loop | public GitHub Issues sync (pagination, retries, rate limits, incremental), evidence-quality score, human-approved decision record (owner, assumptions, rationale), engineering ticket + PRD, release, outcome vs baseline/target from uploaded or clearly-labelled simulated telemetry, forecast-vs-actual retrospective; workspaces persist in SQLite and resume by key |
 | Scenario Lab | capacity & recovery shocks, seeded Monte Carlo, tornado, decision threshold, uncertainty histogram |
 | Decision Memo & PRD | seven generated documents (MD / DOCX / PDF), full decision pack, audit trail export, in-session product metrics |
 
@@ -51,7 +52,7 @@ Third-party data is fetched at runtime and never committed. Full registry: [`doc
 | Bitext customer-service, 27 real intents (labelled, CI) | ARI 0.638, NMI 0.843, stability 0.93; related intents merged (purity 0.69) |
 | Real F-Droid reviews (1,500) | 27 themes, largest 9.5%, silhouette 0.12, subsample stability ARI 0.13; previously 287 fragments |
 | Latency | 976 records 0.54 s · 4,857 records 3.15 s (budgets 5 s / 30 s, set beforehand) |
-| Tests | 108 unit/property/integration/security + 2 real-browser E2E journeys passing locally |
+| Tests | 139 unit/property/integration/security + 3 real-browser E2E journeys, passing locally, in CI and against the live URL |
 
 Details and caveats: [`docs/model-evaluation-report.md`](docs/model-evaluation-report.md) · [`docs/limitations.md`](docs/limitations.md).
 
@@ -78,8 +79,8 @@ Technical: [architecture](docs/architecture.md) · [financial & prioritisation m
 [deployment](docs/deployment.md) · [limitations](docs/limitations.md)
 
 ## Deployment status
-Live on Streamlit Community Cloud: https://signalforge-decision-os.streamlit.app (verified 2026-11-17 in a real browser:
-demo load, capacity recalculation, override + audit, SIGNAL challenge, real F-Droid dataset, and a second visitor session
-with no leakage). Evidence and open items: [`BUILD_STATUS.md`](BUILD_STATUS.md).
+Live on Streamlit Community Cloud: https://signalforge-decision-os.streamlit.app. On 2026-11-18 the full Playwright suite
+(including the closed decision loop, downloads, save/restore, malformed and empty uploads, and an isolated second session)
+passed against the live URL in GitHub Actions. Evidence and known limits: [`BUILD_STATUS.md`](BUILD_STATUS.md).
 
 License: MIT (project code). Third-party datasets keep their own terms (see provenance registry).

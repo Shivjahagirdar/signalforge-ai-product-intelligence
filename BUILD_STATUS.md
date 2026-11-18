@@ -1,22 +1,26 @@
-# BUILD_STATUS (2026-11-17)
+# BUILD_STATUS (2026-11-18)
 
-**Status: PARTIALLY COMPLETE.** Core product, tests, CI, Docker and public deployment are done and verified. A few
-acceptance criteria are only partly met (listed below).
+**Status: COMPLETE for the Release 1 scope:** the P0 evidence-to-outcome vertical slice, built, tested and deployed.
+P1/P2 items and measurement limits are listed below. They are not hidden as "done".
 
 ## Verified, with evidence
 | Item | Evidence |
 |---|---|
-| Live public app | https://signalforge-decision-os.streamlit.app (Streamlit Community Cloud, Python 3.12) |
-| Live journey | Real browser on the live URL: demo load → Roadmap capacity 8 pw recalculated (2 items, 90% used) → override with rationale → audit trail entry → SIGNAL "Challenge this roadmap." grounded answer → switched to real F-Droid reviews (1,500 rows, 27 themes, NO-REVENUE badge) |
-| Session isolation (live) | Second independent session: default capacity/plan, no session-A override text or audit event present |
-| Tests | 110 unit/property/integration/security tests + 2 Playwright browser journeys pass locally and in CI |
-| CI | GitHub Actions green on `bbc80b1` (run 44176412865): ruff, pytest, E2E, evaluation with live public data, pip-audit, Docker build + container health check |
-| Evaluation | `docs/model-evaluation-report.md` (synthetic, held-out, Bitext real labelled, F-Droid real unlabelled, latency vs pre-set budgets) |
-| Security | `docs/security-threat-model.md`; pip-audit: no known vulnerabilities |
+| Live public app | https://signalforge-decision-os.streamlit.app (Streamlit Community Cloud) |
+| Live E2E | `live-e2e` workflow run 44402378436: **3/3 Playwright journeys passed against the live URL**. Covers full decision journey, downloads (MD/DOCX/PDF), save/restore, malformed + empty uploads, isolated second session, and the closed loop (decision → ticket + PRD → release → measured outcome) |
+| Tests | 139 unit/property/integration/security tests + 3 browser journeys pass locally and in CI |
+| CI | `ci` workflow green on `c0f1065` (run 44399991423): ruff, pytest, E2E, evaluation, pip-audit, Docker build + health check |
+| Closed loop (P0 #1) | GitHub Issues ingest → validate/dedupe → evidence-linked themes → explicit-assumption prioritisation → capacity/dependency-feasible MILP roadmap → human approval → ticket + PRD → decision record → outcome vs baseline/target → forecast-vs-actual retrospective |
+| Data model & persistence | `store.py`: SQLite workspaces, decisions, tickets, releases, outcomes, audit log; stable IDs, provenance, timestamps; workspace resume by key; cross-session isolation tested |
+| GitHub integration | `github_sync.py`: public repos without credentials, pagination, retries/backoff, rate-limit handling, incremental `since` sync |
+| Telemetry | Documented event schema (`telemetry.py`); upload your own CSV, or use a seeded simulated sample that is **labelled SIMULATED** everywhere it appears. No telemetry is inferred from issue text |
+| Evidence quality | Completeness, source mix, freshness, contradiction and sample-bias checks shown per opportunity |
+| UX | Bright gradient redesign, 7-step progress bar, page blurbs, "Next →" buttons, icons, friendly empty/error states |
+| Evaluation / security | `docs/model-evaluation-report.md`, `docs/security-threat-model.md`; pip-audit clean |
 
-## Partly met / not done
-* Paraphrase recall (held-out false-split 0.80) and real multi-app review stability (ARI 0.13) are weak; documented, mitigated with human merge/split; sentence-embedding backend optional, not default.
-* Durable persistence: none by design for the public demo (session memory + exports).
-* PDF export not built (MD + DOCX are); GitHub import shares a 60 req/h rate limit on the hosted app.
-* Full 25-step journey on the live URL was verified for the core steps above; downloads and malformed/empty uploads were verified by the automated E2E against a local server, not repeated on the live URL.
-* Human-review agreement and product metrics (time-to-insight, correction rate) are planned measurements, not results.
+## Known limits (honest, not blockers for Release 1)
+* Paraphrase recall is still weak with the default lexical backend (held-out false-split 0.80). Semantic matching (Model2Vec) is opt-in, and human merge/split mitigates the gap.
+* Hosted-demo SQLite persists across sessions and reloads but **not across a platform redeploy**. Use Postgres for real teams (Release 2).
+* GitHub import shares the unauthenticated 60 requests/hour limit on the hosted app.
+* Human-review agreement and real product metrics need real users, so they are planned measurements, not results.
+* Release 2/3 (Jira/Linear, SSO/RBAC multi-tenancy, experimentation, predictive models) are not built.
