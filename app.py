@@ -41,67 +41,88 @@ from signalforge.store import Store, StoreError, new_workspace_id, valid_workspa
 from signalforge.synthetic import generate
 
 st.set_page_config(page_title="SignalForge AI", page_icon="◆", layout="wide")
-POP = ["#7c3aed", "#ec4899", "#f59e0b", "#14b8a6", "#3b82f6", "#22c55e", "#ef4444", "#8b5cf6"]
+POP = ["#0b2545", "#b08d57", "#3e6d9c", "#8da9c4", "#5c7a6b", "#a4508b", "#c0392b", "#6b7280"]
 pio.templates["sf"] = go.layout.Template(layout=dict(
-    colorway=POP, font=dict(family="Inter, -apple-system, Segoe UI, Roboto, sans-serif", color="#1e1b4b"),
-    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,.65)", title=dict(font=dict(size=16)),
-    xaxis=dict(gridcolor="#ede9fe", zerolinecolor="#ddd6fe"), yaxis=dict(gridcolor="#ede9fe", zerolinecolor="#ddd6fe"),
-    legend=dict(bgcolor="rgba(255,255,255,.6)"), margin=dict(l=10, r=10, t=48, b=10)))
+    colorway=POP, font=dict(family="Inter, -apple-system, Segoe UI, Roboto, sans-serif", color="#13233a", size=13),
+    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    title=dict(font=dict(family="Newsreader, Georgia, serif", size=18, color="#0b2545")),
+    xaxis=dict(gridcolor="#e8e4da", zerolinecolor="#d8d2c4", linecolor="#d8d2c4"),
+    yaxis=dict(gridcolor="#e8e4da", zerolinecolor="#d8d2c4", linecolor="#d8d2c4"),
+    legend=dict(bgcolor="rgba(0,0,0,0)"), margin=dict(l=10, r=10, t=52, b=10)))
 pio.templates.default = "plotly_white+sf"
 st.markdown("""<style>
-:root{--p:#7c3aed;--pk:#ec4899;--am:#f59e0b;--tl:#14b8a6;--bl:#3b82f6;--ink:#1e1b4b}
-.stApp{background:radial-gradient(1100px 480px at 8% -8%,#ede9fe 0%,transparent 60%),radial-gradient(900px 420px at 100% 0%,#fce7f3 0%,transparent 55%),#fbfaff}
-.block-container{padding-top:3.6rem;max-width:1360px}
-h1,h2,h3{letter-spacing:-.015em;color:var(--ink)}
-.stApp h1{font-weight:800;background:linear-gradient(90deg,#4c1d95,#be185d);-webkit-background-clip:text;background-clip:text;color:transparent;width:fit-content}
-[data-testid=stSidebar]{background:linear-gradient(180deg,#f3efff 0%,#fff0f7 100%);border-right:1px solid #ede9fe}
-.sf-hero{display:flex;align-items:center;gap:1rem;color:#fff;border-radius:22px;padding:1.1rem 1.5rem;margin:0 0 .9rem;
- background:linear-gradient(120deg,#7c3aed 0%,#ec4899 58%,#f59e0b 100%);box-shadow:0 14px 34px -14px rgba(124,58,237,.6)}
-.sf-logo{font-size:2rem;line-height:1;background:rgba(255,255,255,.22);border-radius:16px;padding:.55rem .75rem}
-.sf-brand{font-size:1.45rem;font-weight:800;letter-spacing:-.02em}.sf-tag{opacity:.93;font-size:.95rem;margin-top:.1rem}
-.sf-steps{display:flex;flex-wrap:wrap;gap:.4rem;margin:.2rem 0 .9rem}
-.sf-step{padding:.28rem .8rem;border-radius:999px;font-size:.8rem;font-weight:600;background:#fff;color:#6b7280;border:1px solid #e9e5ff}
-.sf-step.done{background:#ede9fe;color:#5b21b6;border-color:#ddd6fe}
-.sf-step.on{background:linear-gradient(135deg,#7c3aed,#ec4899);color:#fff;border-color:transparent;box-shadow:0 6px 14px -6px rgba(124,58,237,.7)}
-.sf-blurb{color:#5b5b8a;font-size:1.02rem;margin:-.4rem 0 .9rem}
-[data-testid=stMetric]{background:#fff;border-radius:18px;padding:.85rem 1rem;border-top:5px solid var(--p);
- box-shadow:0 10px 24px -14px rgba(76,29,149,.45);transition:transform .15s ease,box-shadow .15s ease}
-[data-testid=stMetric]:hover{transform:translateY(-3px);box-shadow:0 16px 28px -14px rgba(76,29,149,.55)}
-[data-testid=stColumn]:nth-child(6n+2) [data-testid=stMetric]{border-top-color:var(--pk)}
-[data-testid=stColumn]:nth-child(6n+3) [data-testid=stMetric]{border-top-color:var(--am)}
-[data-testid=stColumn]:nth-child(6n+4) [data-testid=stMetric]{border-top-color:var(--tl)}
-[data-testid=stColumn]:nth-child(6n+5) [data-testid=stMetric]{border-top-color:var(--bl)}
-[data-testid=stColumn]:nth-child(6n+6) [data-testid=stMetric]{border-top-color:#22c55e}
-[data-testid=stMetricValue]{font-size:1.5rem;font-weight:800;color:var(--ink)}
-[data-testid=stMetricLabel]{color:#6b6b99;font-weight:600}
-.stButton button,.stDownloadButton button{border-radius:999px;border:0;font-weight:650;color:#fff;
- background:linear-gradient(135deg,#7c3aed,#ec4899);box-shadow:0 8px 16px -8px rgba(124,58,237,.7);transition:transform .12s ease,filter .12s ease}
-.stButton button p,.stDownloadButton button p{color:#fff}
-.stButton button:hover,.stDownloadButton button:hover{transform:translateY(-2px);filter:brightness(1.07);color:#fff}
-[class*="st-key-q_"] button{background:#fff;color:#5b21b6;border:1px solid #ddd6fe;box-shadow:none;font-weight:600}
-[class*="st-key-q_"] button p{color:#5b21b6}
-[class*="st-key-next_"] button{background:linear-gradient(135deg,#14b8a6,#3b82f6)}
-[data-testid=stExpander]{background:#fff;border-radius:16px;border:1px solid #ede9fe;box-shadow:0 8px 20px -16px rgba(76,29,149,.5)}
-[data-testid=stVerticalBlockBorderWrapper]:has(> div > [data-testid=stVerticalBlock] .sf-card){border-radius:18px}
-div[data-testid=stVerticalBlockBorderWrapper]{border-radius:18px}
-[data-testid=stChatMessage]{border-radius:16px;background:#fff;border:1px solid #f1ecff}
-[data-testid=stSidebar] [data-testid=stRadio] label{background:#fff;border:1px solid #e9e5ff;border-radius:12px;padding:.35rem .7rem;margin-bottom:.25rem;width:100%}
-[data-testid=stSidebar] [data-testid=stRadio] label:has(input:checked){background:linear-gradient(135deg,#7c3aed,#ec4899);border-color:transparent}
-[data-testid=stSidebar] [data-testid=stRadio] label:has(input:checked) p{color:#fff;font-weight:700}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap');
+:root{--navy:#0b2545;--ink:#13233a;--muted:#5f6b7a;--line:#e3ded3;--paper:#faf8f3;--gold:#b08d57;--card:#ffffff}
+html,body,.stApp,.stMarkdown,p,li,label,button,input,textarea{font-family:Inter,-apple-system,"Segoe UI",Roboto,sans-serif}
+.stApp{background:var(--paper)}
+header[data-testid=stHeader]{background:transparent}
+.block-container{padding-top:3.2rem;max-width:1240px}
+.stApp p,.stApp li{color:var(--ink);line-height:1.6}
+.stApp h1{font-family:Newsreader,Georgia,serif;font-weight:600;font-size:2.55rem;letter-spacing:-.01em;color:var(--navy);margin-bottom:.2rem}
+.stApp h2,.stApp h3{font-family:Newsreader,Georgia,serif;font-weight:600;color:var(--navy);letter-spacing:0}
+.stApp h3{font-size:1.4rem;border-top:1px solid var(--line);padding-top:1.1rem;margin-top:1.2rem}
+[data-testid=stSidebar]{background:var(--navy);border-right:0}
+[data-testid=stSidebar] *{color:#e6ebf2}
+[data-testid=stSidebar] p,[data-testid=stSidebar] label,[data-testid=stSidebar] span,[data-testid=stSidebar] small,[data-testid=stSidebar] li{color:#e6ebf2}
+[data-testid=stSidebar] [data-testid=stRadioOption]>div>div:first-child:not([data-testid=stMarkdownContainer]){display:none}
+[data-testid=stSidebar] [data-testid=stRadioOption][data-selected=true]{background:rgba(255,255,255,.1);border-left-color:var(--gold)}
+[data-testid=stSidebar] [data-testid=stRadioOption][data-selected=true] p{font-weight:600;color:#fff}
+[data-testid=stSidebar] [data-testid=stExpander]{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.14)}
+[data-testid=stSidebar] [data-testid=stExpander] summary:hover{background:rgba(255,255,255,.05)}
+[data-testid=stSidebar] [data-testid=stExpander] details{background:transparent}
+[data-testid=stSidebar] .stButton button,[data-testid=stSidebar] .stDownloadButton button{background:transparent;border:1px solid rgba(255,255,255,.3)}
+[data-testid=stSidebar] .stButton button:hover,[data-testid=stSidebar] .stDownloadButton button:hover{border-color:var(--gold);background:rgba(255,255,255,.06)}
+[data-testid=stSidebar] h5{font-size:.7rem!important;letter-spacing:.14em;text-transform:uppercase;color:#9fb0c6!important;font-weight:600}
+[data-testid=stSidebar] hr{border-color:rgba(255,255,255,.12)}
+[data-testid=stSidebar] [data-baseweb=select]>div,[data-testid=stSidebar] input,[data-testid=stSidebar] textarea{background:#12305a!important;border-color:#24446f!important}
+[data-testid=stSidebar] [data-testid=stRadio] label{border-radius:6px;padding:.45rem .7rem;margin-bottom:.1rem;width:100%;border-left:3px solid transparent}
+[data-testid=stSidebar] [data-testid=stRadio] label:hover{background:rgba(255,255,255,.06)}
+[data-testid=stSidebar] [data-testid=stRadio] label:has(input:checked){background:rgba(255,255,255,.1);border-left-color:var(--gold)}
+[data-testid=stSidebar] [data-testid=stRadio] label:has(input:checked) p{font-weight:600;color:#fff}
 [data-testid=stSidebar] [data-testid=stRadio] label>div:first-child{display:none}
-.sf-pill{display:inline-block;padding:.18rem .7rem;border-radius:999px;font-size:.74rem;font-weight:700;margin-right:.35rem}
-.sf-syn{background:#fff4d6;color:#7a5600}.sf-real{background:#d9f7e5;color:#116b34}.sf-warn{background:#fde2e1;color:#8a1c1c}
-.sf-banner{border:1px solid #ddd6fe;border-left:6px solid var(--p);background:linear-gradient(90deg,#f5f3ff,#fff);padding:.8rem 1.1rem;border-radius:14px;margin:.4rem 0 1rem;
- box-shadow:0 10px 22px -18px rgba(76,29,149,.6)}
-.sf-banner b{color:var(--p)}
-.sf-muted{color:#8a94a6;font-size:.85rem}
-.sf-sim{background:#e0e7ff;color:#3730a3}
-.sf-card{border-radius:16px;padding:.9rem 1.1rem;margin:.3rem 0;border:1px solid #eee}
-.sf-good{background:#ecfdf5;border-color:#a7f3d0}.sf-mid{background:#fffbeb;border-color:#fde68a}.sf-bad{background:#fff1f2;border-color:#fecdd3}
+.sf-hero{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid var(--navy);padding:0 0 .7rem;margin:0 0 1.1rem}
+.sf-logo{display:none}
+.sf-brand{font-family:Newsreader,Georgia,serif;font-size:1.35rem;font-weight:600;color:var(--navy)}
+.sf-brand:before{content:"◆ ";color:var(--gold)}
+.sf-tag{font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);text-align:right}
+.sf-steps{display:flex;gap:0;margin:.1rem 0 1.4rem;border:1px solid var(--line);background:var(--card);border-radius:4px;overflow:hidden}
+.sf-step{flex:1;padding:.55rem .7rem;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a93a0;
+ border-right:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sf-step:last-child{border-right:0}
+.sf-step.done{color:var(--navy)}
+.sf-step.on,.sf-step.now{background:var(--navy);color:#fff;box-shadow:inset 0 -3px 0 var(--gold)}
+.sf-blurb{font-family:Newsreader,Georgia,serif;font-size:1.25rem;color:var(--muted);margin:0 0 1.4rem;max-width:62rem;line-height:1.45}
+[data-testid=stMetric]{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:1rem 1.1rem;border-top:3px solid var(--navy)}
+[data-testid=stMetricValue]{font-family:Newsreader,Georgia,serif;font-size:2rem;font-weight:600;color:var(--navy)}
+[data-testid=stMetricLabel] p{color:var(--muted);font-size:.72rem!important;letter-spacing:.1em;text-transform:uppercase;font-weight:600}
+.stButton button,.stDownloadButton button{border-radius:4px;font-weight:600;font-size:.88rem;background:var(--navy);color:#fff;border:1px solid var(--navy);box-shadow:none}
+.stButton button p,.stDownloadButton button p{color:#fff}
+.stButton button:hover,.stDownloadButton button:hover{background:#163a66;border-color:#163a66;color:#fff}
+[class*="st-key-q_"] button{background:var(--card);border:1px solid var(--line)}
+[class*="st-key-q_"] button p{color:var(--navy)}
+[class*="st-key-q_"] button:hover{border-color:var(--gold);background:var(--card)}
+[class*="st-key-next_"] button{background:transparent;border:1px solid var(--navy)}
+[class*="st-key-next_"] button p{color:var(--navy)}
+[class*="st-key-next_"] button:hover{background:var(--navy)}
+[class*="st-key-next_"] button:hover p{color:#fff}
+[data-testid=stExpander]{background:var(--card);border-radius:4px;border:1px solid var(--line)}
+div[data-testid=stVerticalBlockBorderWrapper]{border-radius:4px}
+[data-testid=stChatMessage]{border-radius:4px;background:var(--card);border:1px solid var(--line)}
+[data-testid=stDataFrame]{border:1px solid var(--line);border-radius:4px}
+.stTabs [data-baseweb=tab]{font-weight:600;color:var(--muted)}
+.stTabs [aria-selected=true]{color:var(--navy)}
+.stTabs [data-baseweb=tab-highlight]{background:var(--gold)}
+.sf-pill{display:inline-block;padding:.15rem .55rem;border-radius:3px;font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-right:.35rem;border:1px solid}
+.sf-syn{background:#fbf5e9;color:#80612d;border-color:#e6d5b0}.sf-real{background:#eef5f0;color:#2f5d43;border-color:#c5dccd}
+.sf-warn{background:#fbefed;color:#8f2d22;border-color:#ebc6c0}.sf-sim{background:#eef2f8;color:#2d4a72;border-color:#c9d5e6}
+.sf-banner{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--gold);padding:.95rem 1.2rem;border-radius:4px;margin:.4rem 0 1.2rem}
+.sf-banner b{color:var(--navy)}
+.sf-muted{color:var(--muted);font-size:.85rem}
+.sf-card{border-radius:4px;padding:1rem 1.2rem;margin:.3rem 0;border:1px solid var(--line);background:var(--card)}
+.sf-good{border-left:3px solid #2f5d43}.sf-mid{border-left:3px solid var(--gold)}.sf-bad{border-left:3px solid #8f2d22}
 </style>""", unsafe_allow_html=True)
-st.markdown('<div class="sf-hero"><div class="sf-logo">◆</div><div><div class="sf-brand">SignalForge AI</div>'
-            '<div class="sf-tag">Your customers are telling you what to build. SignalForge tells you what deserves the budget.</div></div></div>',
-            unsafe_allow_html=True)
+st.markdown('<div class="sf-hero"><div class="sf-logo">◆</div><div class="sf-brand">SignalForge AI</div>'
+            '<div class="sf-tag">Product Decision Intelligence</div></div>', unsafe_allow_html=True)
 fmt = lambda v: "n/a" if v is None or pd.isna(v) else f"${v:,.0f}"  # noqa: E731
 
 
@@ -169,11 +190,11 @@ def _on_restore() -> None:
 
 # ---------------- sidebar: data ----------------
 PAGES = ["Executive Dashboard", "Customer Intelligence", "Opportunity Economics", "Roadmap Optimizer", "Decision Loop", "Scenario Lab", "Decision Memo & PRD"]
-ICON = dict(zip(PAGES, ["📊", "🧠", "💰", "🗺️", "🔁", "🧪", "📝"]))
-st.sidebar.markdown("##### Where to?")
-page = st.sidebar.radio("Navigate", PAGES, key="page", format_func=lambda n: f"{ICON[n]}  {n}", label_visibility="collapsed")
+ICON = {p: f"{i + 1:02d}" for i, p in enumerate(PAGES)}
+st.sidebar.markdown("##### Navigation")
+page = st.sidebar.radio("Navigate", PAGES, key="page", format_func=lambda n: f"{ICON[n]}   {n}", label_visibility="collapsed")
 st.sidebar.markdown("---")
-st.sidebar.markdown("##### 1 · Pick your data")
+st.sidebar.markdown("##### Data source")
 SOURCES = {"Synthetic demo (1,000 records)": "synthetic", "Public: F-Droid app reviews": "fdroid_reviews",
            "Public: Bitext support requests": "bitext_support", "Public: GitHub issues (live)": "github_issues", "Upload file": "upload"}
 src_label = st.sidebar.selectbox("Dataset", list(SOURCES), key="dataset")
@@ -244,12 +265,12 @@ is_synth = src == "synthetic"
 has_acv = ingest.df["annual_contract_value"].notna().any()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("##### 2 · Tune the analysis")
+st.sidebar.markdown("##### Analysis settings")
 semantic = st.sidebar.toggle("Semantic matching (beta)", False, key="semantic", on_change=_on_semantic,
                              help="Groups paraphrases better (held-out ARI 0.30 → 0.76 in CI) but loosens tightly-templated data "
                                   "(synthetic ARI 0.999 → 0.37 at the same settings). Downloads a ~30 MB open model once.")
 thr = st.sidebar.slider("Cluster breadth", 0.5, 0.98, 0.9, 0.01, help="Cosine distance threshold. Higher = fewer, broader themes.", key="thr")
-with st.sidebar.expander("💵 Financial assumptions", expanded=not has_acv):
+with st.sidebar.expander("Financial assumptions", expanded=not has_acv):
     if not has_acv:
         st.caption("This dataset has **no revenue**. Values below are labelled user assumptions, not facts.")
     a = Assumptions(
@@ -276,7 +297,7 @@ if st.sidebar.button("↺ Reset my session", key="reset", help="Clears data, ove
     store.reset(); ss.chat = []
     st.rerun()
 
-with st.sidebar.expander("🔑 Your workspace"):
+with st.sidebar.expander("Workspace"):
     st.code(WS, language=None)
     st.caption("Decisions, tickets, releases, outcomes and GitHub syncs are saved to this workspace. Bookmark "
                f"`?ws={WS}` or paste the key below to resume later. Hosted demo storage resets on redeploy.")
@@ -334,25 +355,25 @@ if not has_acv:
     pill += '<span class="sf-pill sf-warn">NO REVENUE DATA - $ values use your assumption</span>'
 st.markdown(pill, unsafe_allow_html=True)
 
-STEPS = ["Pick data", "Review themes", "Check the money", "Plan the roadmap", "Close the loop", "Stress-test", "Share the decision"]
+STEPS = ["Overview", "Evidence", "Economics", "Roadmap", "Decision loop", "Scenarios", "Memo"]
 BLURB = {
-    "Executive Dashboard": "The 30-second answer: what matters most right now, and why.",
-    "Customer Intelligence": "What customers are actually saying, grouped into themes you can inspect, fix and trust.",
-    "Opportunity Economics": "What each theme could be worth, what it costs, and exactly how every number is calculated.",
-    "Roadmap Optimizer": "Set your capacity and constraints; get the best-value plan and see what you are giving up.",
-    "Decision Loop": "Approve a decision, create the ticket and PRD, ship it, then measure whether it actually worked.",
-    "Scenario Lab": "Change the assumptions and watch the decision hold up (or fall apart).",
-    "Decision Memo & PRD": "Everything you need to take this to the room: memo, PRD, evidence, audit trail.",
+    "Executive Dashboard": "Where product investment will create the most value this quarter, and the evidence behind each call.",
+    "Customer Intelligence": "Customer feedback consolidated into evidence-linked themes, each traceable to its source records and open to human review.",
+    "Opportunity Economics": "Value at stake, cost to deliver and expected return for every opportunity, with facts, assumptions and estimates kept distinct.",
+    "Roadmap Optimizer": "A capacity-feasible portfolio that maximises value within your constraints, alongside the trade-offs it implies.",
+    "Decision Loop": "From approved decision to engineering ticket, release and measured outcome, with forecast compared to actual.",
+    "Scenario Lab": "Stress-test the recommendation against shocks and uncertainty before committing capital.",
+    "Decision Memo & PRD": "Board-ready materials: executive memo, PRD, evidence appendix and a complete decision audit trail.",
 }
 cur = PAGES.index(page)
 st.markdown('<div class="sf-steps">' + "".join(
-    f'<span class="sf-step {"on" if i == cur else "done" if i < cur else ""}">{ICON[PAGES[i]]} {i + 1}. {STEPS[i]}</span>'
+    f'<span class="sf-step {"on" if i == cur else "done" if i < cur else ""}">{ICON[PAGES[i]]}&nbsp;&nbsp;{STEPS[i]}</span>'
     for i in range(len(PAGES))) + "</div>", unsafe_allow_html=True)
 
 
 def next_step() -> None:
     if cur < len(PAGES) - 1:
-        st.button(f"Next: {PAGES[cur + 1]} →", on_click=_go, args=(PAGES[cur + 1],), key=f"next_{cur}")
+        st.button(f"Continue to {PAGES[cur + 1]}  →", on_click=_go, args=(PAGES[cur + 1],), key=f"next_{cur}")
 
 # ---------------- roadmap constraints (shared by optimizer, copilot, memo) ----------------
 cap_default = float(round(ranked["effort_weeks"].sum() * 0.6, 1)) or 10.0
@@ -390,7 +411,7 @@ def signal_panel(selected: int | None = None) -> None:
         for qq, md, table in ss.chat[:3]:
             with st.chat_message("user"):
                 st.markdown(qq)
-            with st.chat_message("assistant", avatar="✨"):
+            with st.chat_message("assistant", avatar=":material/insights:"):
                 st.markdown(md)
                 if table:
                     st.dataframe(pd.DataFrame(table), width="stretch", hide_index=True)
@@ -416,7 +437,7 @@ def insight_banner() -> str:
 if page == "Executive Dashboard":
     st.title("Executive Dashboard")
     st.markdown(f'<div class="sf-blurb">{BLURB["Executive Dashboard"]}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sf-banner">🔁 <b>Full loop:</b> evidence-linked themes → revenue economics → capacity-feasible roadmap → '
+    st.markdown('<div class="sf-banner"><b>Operating model.</b> evidence-linked themes → revenue economics → capacity-feasible roadmap → '
                 'human-approved decision → ticket + PRD → release → measured outcome. Run it in <b>Decision Loop</b>.</div>', unsafe_allow_html=True)
     signal_panel()
     if not ss.onboarded:
@@ -442,9 +463,8 @@ if page == "Executive Dashboard":
         st.subheader("Recommended executive actions")
         for r in ranked.head(3).itertuples():
             with st.container(border=True):
-                badge = {"sufficient": "🟢", "directional": "🟡", "insufficient": "🔴"}[r.evidence_sufficiency]
-                medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(int(r.final_rank), "🔹")
-                st.markdown(f"{medal} **#{r.final_rank} · {r.label}** · {r.product_area} · {badge} evidence {r.evidence_sufficiency}")
+                badge = {"sufficient": "●", "directional": "◐", "insufficient": "○"}[r.evidence_sufficiency]
+                st.markdown(f"**{int(r.final_rank):02d} — {r.label}** · {r.product_area} · {badge} evidence {r.evidence_sufficiency}")
                 st.write(f"{r.unique_accounts} accounts · exposure {fmt(r.potential_revenue_exposure)} · net {fmt(r.net_opportunity_value)} · "
                          f"{r.effort_weeks:.1f} pw · confidence {r.confidence:.2f} · trend {r.trend_status}")
         if len(ranked) > 1:
@@ -716,7 +736,7 @@ elif page == "Decision Loop":
     reached = {"proposed": 1, "approved": 2, "rejected": 1, "in_delivery": 3, "released": 4, "measured": 5, "reverted": 1}
     cur = max([reached[d_.status] for d_ in decs], default=0)
     st.markdown('<div class="sf-steps">' + "".join(
-        f'<div class="sf-step {"done" if i < cur else "now" if i == cur else ""}">{"✅ " if i < cur else ""}{s_}</div>'
+        f'<div class="sf-step {"done" if i < cur else "now" if i == cur else ""}">{"✓ " if i < cur else ""}{s_}</div>'
         for i, s_ in enumerate(stages)) + "</div>", unsafe_allow_html=True)
     st.caption(f"Workspace `{WS}` · stored durably in SQLite ({'file' if DB.durable else 'memory'}). Every action below is "
                "permission-checked, audited and reversible.")
@@ -765,9 +785,9 @@ elif page == "Decision Loop":
         note = st.text_input("Approval / rejection note (required)", key="loop_note")
         b1, b2, b3 = st.columns(3)
         act = None
-        if b1.button("✅ Approve", key="b_approve", disabled=d.status != "proposed"):
+        if b1.button("Approve decision", key="b_approve", disabled=d.status != "proposed"):
             act = ("approved", note)
-        if b2.button("✖ Reject", key="b_reject", disabled=d.status != "proposed"):
+        if b2.button("Reject", key="b_reject", disabled=d.status != "proposed"):
             act = ("rejected", note)
         if b3.button("↩ Revert decision", key="b_revert", disabled=d.status in ("proposed", "rejected", "reverted"),
                      help="Reversible: moves it to 'reverted'; history is kept in the audit log"):
@@ -864,7 +884,7 @@ elif page == "Decision Loop":
                 st.warning(res["explanation"])
             else:
                 vcls = {"worked": "sf-good", "improved_below_target": "sf-mid", "inconclusive": "sf-mid"}.get(res["verdict"], "sf-bad")
-                emoji = {"worked": "🎉", "improved_below_target": "📈", "inconclusive": "🤔", "regressed": "📉", "guardrail_breached": "⚠️"}
+                emoji = {"worked": "✓", "improved_below_target": "↗", "inconclusive": "?", "regressed": "↘", "guardrail_breached": "!"}
                 st.markdown(f'<div class="sf-card {vcls}"><b>{emoji.get(res["verdict"], "")} Verdict: {res["verdict"].replace("_", " ")}</b> '
                             f'· {res.get("data_label", label)}<br>{res["forecast"]["summary"]}</div>', unsafe_allow_html=True)
                 g = pd.DataFrame({"window": ["28 days before", "28 days after"], "adoption": [res["adoption_pre"], res["adoption_post"]]})

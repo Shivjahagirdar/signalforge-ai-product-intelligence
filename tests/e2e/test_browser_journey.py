@@ -179,7 +179,7 @@ def test_closed_loop_decision_to_outcome(base_url, browser, tmp_path):
     _wait(page, "Human approval")
     page.get_by_label("Approval / rejection note (required)").fill("E2E approved"); page.keyboard.press("Enter")
     page.wait_for_timeout(800)
-    page.get_by_role("button", name="✅ Approve").click()
+    page.get_by_role("button", name="Approve decision").click()
     page.get_by_role("button", name="Create ticket").wait_for(timeout=60_000)
     page.get_by_role("button", name="Create ticket").click()
     _wait(page, "Ticket #")
