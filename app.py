@@ -85,9 +85,9 @@ header[data-testid=stHeader]{background:transparent}
 .sf-brand{font-family:Newsreader,Georgia,serif;font-size:1.35rem;font-weight:600;color:var(--navy)}
 .sf-brand:before{content:"◆ ";color:var(--gold)}
 .sf-tag{font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);text-align:right}
-.sf-steps{display:flex;gap:0;margin:.1rem 0 1.4rem;border:1px solid var(--line);background:var(--card);border-radius:4px;overflow:hidden}
-.sf-step{flex:1;padding:.55rem .7rem;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a93a0;
- border-right:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sf-steps{display:flex;flex-wrap:wrap;gap:0;margin:.1rem 0 1.4rem;border:1px solid var(--line);background:var(--card);border-radius:4px;overflow:hidden}
+.sf-step{flex:1 1 120px;padding:.55rem .7rem;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8a93a0;
+ border-right:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:-1px;white-space:nowrap}
 .sf-step:last-child{border-right:0}
 .sf-step.done{color:var(--navy)}
 .sf-step.on,.sf-step.now{background:var(--navy);color:#fff;box-shadow:inset 0 -3px 0 var(--gold)}
