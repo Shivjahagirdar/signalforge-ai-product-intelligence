@@ -1,0 +1,52 @@
+name: android-release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version name (e.g. 1.0.0)
+        default: "1.0.0"
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: android } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - name: Signing key (repo secret if set, otherwise a one-off key for this build)
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > release.jks; echo "KEYSTORE_PASSWORD=$KS_PW" >> $GITHUB_ENV; echo "KEY_KIND=permanent" >> $GITHUB_ENV
+          else
+            PW=$(openssl rand -hex 16); echo "::add-mask::$PW"
+            keytool -genkeypair -keystore release.jks -alias signalforge -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$PW" -keypass "$PW" -dname "CN=SignalForge AI, C=US"
+            echo "KEYSTORE_PASSWORD=$PW" >> $GITHUB_ENV; echo "KEY_KIND=temporary" >> $GITHUB_ENV
+          fi
+          echo "KEYSTORE_PATH=$PWD/release.jks" >> $GITHUB_ENV
+      - name: Build signed APK + AAB
+        env:
+          VERSION_NAME: ${{ inputs.version }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: gradle --no-daemon assembleRelease bundleRelease
+      - name: Verify signature
+        run: |
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | tail -1)
+          $APKSIGNER verify --print-certs app/build/outputs/apk/release/app-release.apk | head -3
+          cp app/build/outputs/apk/release/app-release.apk ../SignalForge-AI-${{ inputs.version }}.apk
+          cp app/build/outputs/bundle/release/app-release.aab ../SignalForge-AI-${{ inputs.version }}.aab
+      - name: Publish GitHub Release
+        working-directory: .
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release create "android-v${{ inputs.version }}" SignalForge-AI-*.apk SignalForge-AI-*.aab android/play-icon-512.png android/play-feature-graphic.png \
+            --title "SignalForge AI for Android v${{ inputs.version }}" --notes "Install: download SignalForge-AI-${{ inputs.version }}.apk on an Android phone, open it, allow 'Install unknown apps' when asked.
+          The app opens the live SignalForge decision OS (https://signalforge-decision-os.streamlit.app); it needs internet. If you see a sleep screen, tap 'Yes, get this app back up!' and wait ~1 minute.
+          The .aab is the Google Play upload bundle. Signing key: ${KEY_KIND}."
