@@ -11,6 +11,7 @@ import plotly.io as pio
 import streamlit as st
 
 from signalforge import evidence_quality as EQ
+from signalforge import gamify as G
 from signalforge import lifecycle as LC
 from signalforge import telemetry as TM
 from signalforge.audit import AuditStore, Overrides
@@ -120,6 +121,19 @@ div[data-testid=stVerticalBlockBorderWrapper]{border-radius:4px}
 .sf-muted{color:var(--muted);font-size:.85rem}
 .sf-card{border-radius:4px;padding:1rem 1.2rem;margin:.3rem 0;border:1px solid var(--line);background:var(--card)}
 .sf-good{border-left:3px solid #2f5d43}.sf-mid{border-left:3px solid var(--gold)}.sf-bad{border-left:3px solid #8f2d22}
+.sf-hud{background:linear-gradient(135deg,#12305a,#0b2545);border:1px solid rgba(176,141,87,.55);border-radius:8px;padding:.8rem .9rem;margin:.2rem 0 .6rem;box-shadow:0 0 18px rgba(176,141,87,.18)}
+.sf-hud-top{display:flex;align-items:center;gap:.5rem}
+.sf-lv{background:var(--gold);color:#0b2545!important;font-weight:800;font-size:.72rem;padding:.12rem .45rem;border-radius:4px;letter-spacing:.06em}
+.sf-rank{font-family:Newsreader,Georgia,serif;font-size:1.08rem;font-weight:600;color:#fff!important}
+.sf-combo{margin-left:auto;font-weight:800;color:#ffcf7a!important;animation:sfpulse 1s ease-in-out infinite}
+.sf-xpbar{height:9px;background:rgba(255,255,255,.12);border-radius:6px;margin:.55rem 0 .35rem;overflow:hidden}
+.sf-xpbar div{height:100%;background:linear-gradient(90deg,#b08d57,#f2d29b);border-radius:6px;transition:width .8s ease;box-shadow:0 0 10px #f2d29b}
+.sf-hud-sub{font-size:.74rem;color:#b9c6d8!important}
+.sf-mission{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:6px;padding:.7rem 1rem;animation:sfin .5s ease}
+.sf-mission-k{font-size:.66rem;font-weight:800;letter-spacing:.14em;color:var(--gold)}
+.sf-mission-xp{background:#fbf5e9;border:1px solid #e6d5b0;color:#80612d;font-weight:800;font-size:.72rem;padding:.08rem .45rem;border-radius:10px;margin-left:.3rem}
+@keyframes sfpulse{50%{opacity:.55}}
+@keyframes sfin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 </style>""", unsafe_allow_html=True)
 st.markdown('<div class="sf-hero"><div class="sf-logo">◆</div><div class="sf-brand">SignalForge AI</div>'
             '<div class="sf-tag">Product Decision Intelligence</div></div>', unsafe_allow_html=True)
@@ -191,6 +205,9 @@ def _on_restore() -> None:
 # ---------------- sidebar: data ----------------
 PAGES = ["Executive Dashboard", "Customer Intelligence", "Opportunity Economics", "Roadmap Optimizer", "Decision Loop", "Scenario Lab", "Decision Memo & PRD"]
 ICON = {p: f"{i + 1:02d}" for i, p in enumerate(PAGES)}
+if "player" not in ss:
+    ss.player = G.Player()
+HUD = st.sidebar.container()  # filled at the end of the run, after this run's actions are scored
 st.sidebar.markdown("##### Navigation")
 page = st.sidebar.radio("Navigate", PAGES, key="page", format_func=lambda n: f"{ICON[n]}   {n}", label_visibility="collapsed")
 st.sidebar.markdown("---")
@@ -369,6 +386,7 @@ cur = PAGES.index(page)
 st.markdown('<div class="sf-steps">' + "".join(
     f'<span class="sf-step {"on" if i == cur else "done" if i < cur else ""}">{ICON[PAGES[i]]}&nbsp;&nbsp;{STEPS[i]}</span>'
     for i in range(len(PAGES))) + "</div>", unsafe_allow_html=True)
+MISSION = st.container()
 
 
 def next_step() -> None:
@@ -953,3 +971,57 @@ st.sidebar.markdown("---")
 if spec:
     with st.sidebar.expander("Data provenance"):
         st.markdown(f"**{spec.name}**  \nLicense: {spec.license}  \nSource: {spec.url}  \n{spec.provenance}  \n*Limits:* {spec.limitations}")
+
+
+# ---------------------------------------------------------------- game layer: score this run, then draw HUD
+def _game_events() -> set[str]:
+    ev = {f"visit:{page}"}
+    keys = [k for k, v in ss.items() if isinstance(k, str) and v is True]
+    hits = lambda *pre: any(k.startswith(pre) for k in keys)  # noqa: E731
+    if hits("q_", "askbtn_") and ss.chat:
+        ev.add("ask")
+    if any(k.startswith("q_") and k.endswith("_9") for k in keys):
+        ev.add("debate")
+    if page == "Customer Intelligence" and hits("b_rename", "b_merge", "b_split", "b_excl", "b_reject"):
+        ev.add("curate")
+    if hits("b_dep", "b_override"):
+        ev.add("constrain")
+    if hits("dl_pack", "dlmd_", "dldocx_", "dlpdf_", "dl_tprd", "dl_ticket"):
+        ev.add("publish")
+    stage = {"proposed": 1, "approved": 2, "in_delivery": 3, "released": 4, "measured": 5}
+    best = max([stage.get(d_.status, 0) for d_ in DB.decisions(WS)], default=0)
+    ev.update(["propose", "approve", "ticket", "ship", "measure"][:best])
+    return ev
+
+
+P = ss.player
+for kind, msg in G.award(P, _game_events(), len(PAGES)):
+    st.toast(msg, icon={"quest": "⭐", "badge": "🏆", "level": "🚀"}.get(kind, "✨"))
+    if kind == "level":
+        st.balloons()
+lv, title, lo, hi = G.level(P.xp)
+pct = int(G.progress(P.xp) * 100)
+with HUD:
+    st.markdown(
+        f'<div class="sf-hud"><div class="sf-hud-top"><span class="sf-lv">LV {lv}</span><span class="sf-rank">{title}</span>'
+        f'{"<span class=sf-combo>🔥 x" + str(P.combo) + "</span>" if P.combo > 1 else ""}</div>'
+        f'<div class="sf-xpbar"><div style="width:{pct}%"></div></div>'
+        f'<div class="sf-hud-sub">{P.xp} XP{f" · {hi - P.xp} to next rank" if hi else " · max rank"} · '
+        f'{len(P.done)}/{len(G.QUESTS)} quests</div></div>', unsafe_allow_html=True)
+    with st.expander(f"🏆 Quests & badges ({len(P.done)}/{len(G.QUESTS)})"):
+        st.markdown("\n".join(f"{'✅' if q[0] in P.done else '⬜'} **{q[1]}** · +{q[2]} XP" for q in G.QUESTS))
+        st.markdown("**Badges:** " + (" · ".join(f"🏅 {b}" for b in P.badges) if P.badges else "none yet. Chain quests within 2 min for combos."))
+nq = G.next_quest(P)
+with MISSION:
+    if nq and nq[0] == "tour":
+        _left = [p_ for p_ in PAGES if p_ not in P.visited]
+        nq = (nq[0], f"{nq[1]} ({len(PAGES) - len(_left)}/{len(PAGES)} rooms)", nq[2], nq[3] + f" +{G.VISIT_XP} XP per new room.", _left[0])
+    if nq:
+        m1, m2 = st.columns([5, 1], vertical_alignment="center")
+        m1.markdown(f'<div class="sf-mission"><span class="sf-mission-k">NEXT MISSION</span> <b>{nq[1]}</b> '
+                    f'<span class="sf-mission-xp">+{nq[2]} XP</span><br><span class="sf-muted">{nq[3]}</span></div>', unsafe_allow_html=True)
+        if nq[4] != page:
+            m2.button("Go →", key="b_mission_go", on_click=_go, args=(nq[4],), width="stretch")
+    else:
+        st.markdown('<div class="sf-mission"><b>🏆 All missions complete.</b> You closed the loop like a Chief Product Officer.</div>',
+                    unsafe_allow_html=True)
